@@ -20,6 +20,11 @@ enum Command {
         #[command(subcommand)]
         cmd: cli::ProjectCommand,
     },
+    /// Database management
+    Db {
+        #[command(subcommand)]
+        cmd: cli::DbCommand,
+    },
 }
 
 fn main() {
@@ -33,6 +38,7 @@ fn main() {
     let cli = Cli::parse();
     let result = match cli.command {
         Command::Project { cmd } => cli::run_project(cmd),
+        Command::Db { cmd } => cli::run_db(cmd),
     };
 
     if let Err(e) = result {
