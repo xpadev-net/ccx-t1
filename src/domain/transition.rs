@@ -140,6 +140,27 @@ mod tests {
     }
 
     #[test]
+    fn return_and_interruption_flows_are_valid() {
+        let transitions = [
+            // Return flow
+            (Running, Returned),
+            (Returned, Superseded),
+            (Returned, TaskFileCreated),
+            // Interruptions and failures
+            (Running, Blocked),
+            (Running, Failed),
+            (GateCheck, Failed),
+            (GateCheck, Blocked),
+            (Merging, GateCheck),
+            (Merging, ReviewFixing),
+            (ReviewFixing, Blocked),
+        ];
+        for (from, to) in transitions {
+            assert!(validate_transition(from, to).is_ok(), "{from} → {to} should be valid");
+        }
+    }
+
+    #[test]
     fn retry_and_resume_flows_are_valid() {
         let transitions = [
             (Failed, Dispatched),
