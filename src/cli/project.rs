@@ -164,9 +164,6 @@ pub fn status(args: StatusArgs) -> Result<(), CcxError> {
 mod tests {
     use super::*;
 
-    // Tests that set CCX_HOME must not run concurrently — env vars are process-global.
-    static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     #[test]
     fn test_path_to_slug() {
         let path = Utf8PathBuf::from("/Users/xpadev/src/myrepo");
@@ -175,8 +172,8 @@ mod tests {
 
     #[test]
     fn test_register_creates_project_json() {
-        let _guard = TEST_LOCK.lock().unwrap();
         let tmp = tempfile::tempdir().unwrap();
+        // SAFETY: single-threaded test, no concurrent env reads
         unsafe { std::env::set_var("CCX_HOME", tmp.path().to_str().unwrap()) };
 
         let repo = Utf8PathBuf::from(tmp.path().join("repo").to_str().unwrap());
@@ -205,7 +202,6 @@ mod tests {
 
     #[test]
     fn test_register_appends_event_before_config() {
-        let _guard = TEST_LOCK.lock().unwrap();
         let tmp = tempfile::tempdir().unwrap();
         unsafe { std::env::set_var("CCX_HOME", tmp.path().to_str().unwrap()) };
 
