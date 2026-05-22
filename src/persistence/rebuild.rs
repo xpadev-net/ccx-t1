@@ -76,7 +76,7 @@ pub fn verify(dir: &Utf8Path, project_id: &str) -> Result<VerifyResult, CcxError
         .read(true)
         .write(true)
         .open(&lock_path)?;
-    let mut rw_lock = RwLock::new(lock_file);
+    let rw_lock = RwLock::new(lock_file);
     let _guard = rw_lock.read()?;
 
     let events = read_events_from_dir(dir)?;

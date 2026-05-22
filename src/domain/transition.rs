@@ -27,9 +27,11 @@ pub fn validate_transition(
         (WorkExecutionState::MergeReady, WorkExecutionState::Merging) => true,
         (WorkExecutionState::Merging, WorkExecutionState::Merged) => true,
 
+        // Post-merge follow-up
+        (WorkExecutionState::Merged, WorkExecutionState::FollowupRequired) => true,
+
         // Return flow
         (WorkExecutionState::Running, WorkExecutionState::Returned) => true,
-        (WorkExecutionState::Returned, WorkExecutionState::Hold) => true,
         (WorkExecutionState::Returned, WorkExecutionState::Superseded) => true,
         (WorkExecutionState::Returned, WorkExecutionState::TaskFileCreated) => true,
 
@@ -42,7 +44,7 @@ pub fn validate_transition(
         (WorkExecutionState::Merging, WorkExecutionState::ReviewFixing) => true,
         (WorkExecutionState::ReviewFixing, WorkExecutionState::Blocked) => true,
 
-        // Any state → Hold or Canceled
+        // Any state → Hold or Canceled (must appear before specific Hold/Canceled arms)
         (_, WorkExecutionState::Hold) => true,
         (_, WorkExecutionState::Canceled) => true,
 
@@ -50,11 +52,9 @@ pub fn validate_transition(
         (WorkExecutionState::Failed, WorkExecutionState::Dispatched) => true,
         (WorkExecutionState::Failed, WorkExecutionState::TaskFileCreated) => true,
         (WorkExecutionState::Blocked, WorkExecutionState::Running) => true,
-        (WorkExecutionState::Blocked, WorkExecutionState::Hold) => true,
         (WorkExecutionState::Hold, WorkExecutionState::Dispatched) => true,
         (WorkExecutionState::Hold, WorkExecutionState::Running) => true,
         (WorkExecutionState::Hold, WorkExecutionState::TaskFileCreated) => true,
-        (WorkExecutionState::MergeReady, WorkExecutionState::Hold) => true,
 
         _ => false,
     };
