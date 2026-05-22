@@ -1,13 +1,14 @@
+use std::fs::{self, OpenOptions};
+use std::io::ErrorKind;
+
 use crate::config::project_config::{CleanupPolicy, GhReviewHook, ProjectConfig};
 use crate::config::{ccx_home, project_dir};
-use crate::domain::event::{
-    Actor, Event, EventData, ProjectRegisteredPayload, generate_id,
-};
+use crate::domain::event::{Actor, Event, EventData, ProjectRegisteredPayload, generate_id};
 use crate::error::CcxError;
 use crate::persistence::jsonl::append_event;
 use camino::Utf8PathBuf;
 use clap::Args;
-use std::fs;
+use fd_lock::RwLock;
 
 /// Derive a display slug from a path: strip leading '/', replace '/' with '-'.
 fn path_to_slug(path: &Utf8PathBuf) -> String {
@@ -39,29 +40,14 @@ pub fn register(args: RegisterArgs) -> Result<(), CcxError> {
         created_at,
     };
 
+    let home = ccx_home()?;
+    fs::create_dir_all(&home)?;
+
+    // Step 1: append the audit event FIRST so the event log is the source of truth.
+    // If subsequent writes fail the event is orphaned, but the project can be
+    // reconstructed or the partial state detected via reconciliation.
     let dir = project_dir(&project_id)?;
     fs::create_dir_all(&dir)?;
-
-    let config_path = dir.join("project.json");
-    let json = serde_json::to_string_pretty(&config)?;
-    fs::write(&config_path, json)?;
-
-    // Also register in ccx_home index
-    let index_path = ccx_home()?.join("projects.json");
-    let mut index: Vec<serde_json::Value> = if index_path.exists() {
-        let raw = fs::read_to_string(&index_path)?;
-        serde_json::from_str(&raw)?
-    } else {
-        vec![]
-    };
-    index.push(serde_json::json!({
-        "project_id": config.project_id,
-        "display_slug": config.display_slug,
-        "canonical_repo": config.canonical_repo,
-    }));
-    fs::write(&index_path, serde_json::to_string_pretty(&index)?)?;
-
-    // Append audit event.
     let event = Event::new(
         &config.project_id,
         Actor::Controller,
@@ -73,7 +59,43 @@ pub fn register(args: RegisterArgs) -> Result<(), CcxError> {
     );
     append_event(&config.project_id, &event)?;
 
+    // Step 2: persist project config.
+    let config_path = dir.join("project.json");
+    let json = serde_json::to_string_pretty(&config)?;
+    fs::write(&config_path, json)?;
+
+    // Step 3: update the global projects.json index under an exclusive lock.
+    update_projects_index(&home, &config)?;
+
     println!("{}", serde_json::to_string_pretty(&config)?);
+    Ok(())
+}
+
+/// Atomically update `<ccx_home>/projects.json` using an exclusive fd-lock.
+fn update_projects_index(home: &Utf8PathBuf, config: &ProjectConfig) -> Result<(), CcxError> {
+    let lock_path = home.join("projects.lock");
+    let index_path = home.join("projects.json");
+
+    let lock_file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(&lock_path)?;
+    let mut rw_lock = RwLock::new(lock_file);
+    let _guard = rw_lock.write()?;
+
+    let mut index: Vec<serde_json::Value> = match fs::read_to_string(&index_path) {
+        Ok(raw) => serde_json::from_str(&raw)?,
+        Err(e) if e.kind() == ErrorKind::NotFound => vec![],
+        Err(e) => return Err(e.into()),
+    };
+
+    index.push(serde_json::json!({
+        "project_id": config.project_id,
+        "display_slug": config.display_slug,
+        "canonical_repo": config.canonical_repo,
+    }));
+    fs::write(&index_path, serde_json::to_string_pretty(&index)?)?;
     Ok(())
 }
 
@@ -85,11 +107,10 @@ pub struct ListArgs {
 
 pub fn list(args: ListArgs) -> Result<(), CcxError> {
     let index_path = ccx_home()?.join("projects.json");
-    let projects: Vec<serde_json::Value> = if index_path.exists() {
-        let raw = fs::read_to_string(&index_path)?;
-        serde_json::from_str(&raw)?
-    } else {
-        vec![]
+    let projects: Vec<serde_json::Value> = match fs::read_to_string(&index_path) {
+        Ok(raw) => serde_json::from_str(&raw)?,
+        Err(e) if e.kind() == ErrorKind::NotFound => vec![],
+        Err(e) => return Err(e.into()),
     };
 
     if args.json {
@@ -117,12 +138,15 @@ pub struct StatusArgs {
 pub fn status(args: StatusArgs) -> Result<(), CcxError> {
     let dir = project_dir(&args.project_id)?;
     let config_path = dir.join("project.json");
-    if !config_path.exists() {
-        return Err(CcxError::ProjectNotFound {
-            project_id: args.project_id,
-        });
-    }
-    let raw = fs::read_to_string(&config_path)?;
+    let raw = match fs::read_to_string(&config_path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == ErrorKind::NotFound => {
+            return Err(CcxError::ProjectNotFound {
+                project_id: args.project_id,
+            })
+        }
+        Err(e) => return Err(e.into()),
+    };
     let config: ProjectConfig = serde_json::from_str(&raw)?;
     if args.json {
         println!("{}", serde_json::to_string_pretty(&config)?);
@@ -171,6 +195,43 @@ mod tests {
         assert_eq!(
             index[0]["display_slug"].as_str().unwrap(),
             path_to_slug(&repo)
+        );
+
+        unsafe { std::env::remove_var("CCX_HOME") };
+    }
+
+    #[test]
+    fn test_register_appends_event_before_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        unsafe { std::env::set_var("CCX_HOME", tmp.path().to_str().unwrap()) };
+
+        let repo = Utf8PathBuf::from(tmp.path().join("repo").to_str().unwrap());
+        let tasks = repo.join("z/tasks.md");
+        fs::create_dir_all(&repo).unwrap();
+
+        register(RegisterArgs {
+            canonical_repo: repo.clone(),
+            task_source_file: tasks.clone(),
+        })
+        .unwrap();
+
+        // Find the project_id from the index.
+        let index_path = tmp.path().join("projects.json");
+        let raw = fs::read_to_string(&index_path).unwrap();
+        let index: Vec<serde_json::Value> = serde_json::from_str(&raw).unwrap();
+        let project_id = index[0]["project_id"].as_str().unwrap().to_string();
+
+        // events.jsonl must exist and contain exactly one ProjectRegistered event.
+        let events_path = tmp
+            .path()
+            .join(format!("projects/{}/events.jsonl", project_id));
+        assert!(events_path.exists(), "events.jsonl must be created");
+        let events_raw = fs::read_to_string(&events_path).unwrap();
+        let lines: Vec<&str> = events_raw.lines().collect();
+        assert_eq!(lines.len(), 1, "exactly one event expected");
+        assert!(
+            lines[0].contains("project_registered"),
+            "first event must be project_registered"
         );
 
         unsafe { std::env::remove_var("CCX_HOME") };
