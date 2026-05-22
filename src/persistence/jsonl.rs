@@ -57,14 +57,22 @@ pub fn read_events(project_id: &str) -> Result<Vec<Event>, CcxError> {
 }
 
 /// Read all events from `events.jsonl` inside `dir`, in append order.
+///
+/// Note: this function does not hold the `events.lock` while reading.
+/// Concurrent appenders use O_APPEND semantics, so complete JSON lines are
+/// atomic for writes up to the OS page size, but a reader can theoretically
+/// observe a partial last line if a very large event is mid-write. In that
+/// case `serde_json::from_str` will return a parse error; callers should
+/// treat `CcxError::Database` on the last line as a transient condition and
+/// retry if needed.
 pub fn read_events_from_dir(dir: &Utf8Path) -> Result<Vec<Event>, CcxError> {
     let log_path = dir.join("events.jsonl");
 
-    if !log_path.exists() {
-        return Ok(vec![]);
-    }
-
-    let raw = std::fs::read_to_string(&log_path)?;
+    let raw = match std::fs::read_to_string(&log_path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
+        Err(e) => return Err(e.into()),
+    };
     let mut events = Vec::new();
     for (line_no, line) in raw.lines().enumerate() {
         let line = line.trim();

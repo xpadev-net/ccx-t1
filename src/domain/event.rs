@@ -13,43 +13,6 @@ pub fn generate_id() -> Ulid {
     generator.generate().unwrap_or_else(|_| Ulid::new())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum EventType {
-    ProjectRegistered,
-    TaskSourceFileChanged,
-    WorkExecutionCreated,
-    WorkExecutionTaskFileCreated,
-    WorkExecutionStateChanged,
-    WorkExecutionTaskFileChanged,
-    AgentSessionCreated,
-    AgentSessionAttached,
-    AgentSessionPrompted,
-    AgentSessionHeartbeat,
-    AgentSessionHung,
-    AgentSessionStopped,
-    AgentLifecycleStop,
-    WriteLeaseAcquired,
-    WriteLeaseReleased,
-    WriteLeaseStale,
-    WriteLeaseRevoked,
-    PrOpened,
-    PrHeadUpdated,
-    GhReviewHookStarted,
-    GhReviewHookCompleted,
-    MergeLockAcquired,
-    MergeStarted,
-    MergeCompleted,
-    MergeFailed,
-    CanonicalSyncCompleted,
-    CanonicalSyncFailed,
-    CleanupStarted,
-    CleanupCompleted,
-    UserIntervention,
-    WorktreeCreated,
-    BranchCreated,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Actor {
