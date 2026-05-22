@@ -44,7 +44,7 @@ pub fn validate_transition(
         (WorkExecutionState::Merging, WorkExecutionState::ReviewFixing) => true,
         (WorkExecutionState::ReviewFixing, WorkExecutionState::Blocked) => true,
 
-        // Any state → Hold or Canceled (must appear before specific Hold/Canceled arms)
+        // Any state → Hold or Canceled
         (_, WorkExecutionState::Hold) => true,
         (_, WorkExecutionState::Canceled) => true,
 
@@ -103,10 +103,17 @@ mod tests {
 
     #[test]
     fn any_state_can_transition_to_hold_or_canceled() {
-        for from in [Created, Running, PrOpen, GateCheck, Merging, Failed, Blocked] {
+        for from in [
+            Created, TaskFileCreated, Dispatched, Running, PrOpen, GateCheck,
+            ReviewFixing, MergeReady, Merging, Merged, FollowupRequired,
+            Returned, Blocked, Failed, Superseded,
+        ] {
             assert!(validate_transition(from, Hold).is_ok(), "{from} → Hold");
             assert!(validate_transition(from, Canceled).is_ok(), "{from} → Canceled");
         }
+        // Cross-transitions between the two interrupt states
+        assert!(validate_transition(Canceled, Hold).is_ok(), "Canceled → Hold");
+        assert!(validate_transition(Hold, Canceled).is_ok(), "Hold → Canceled");
     }
 
     #[test]
