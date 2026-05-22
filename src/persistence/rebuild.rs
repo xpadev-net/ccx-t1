@@ -1,26 +1,22 @@
 use camino::Utf8Path;
+use fd_lock::RwLock;
+use rusqlite::OptionalExtension;
+use std::fs::OpenOptions;
 
 use crate::error::CcxError;
 use crate::persistence::jsonl::read_events_from_dir;
 use crate::persistence::projector::apply_event_tx;
 use crate::persistence::sqlite::{clear_dirty, open_db, run_migrations};
-use rusqlite::OptionalExtension;
 
 /// Rebuild the SQLite read model from scratch by replaying all events in `events.jsonl`.
 ///
-/// Steps:
-///   1. Acquire events.lock (exclusive) so no concurrent appends race the replay.
-///   2. Drop all tables and re-run DDL migrations (clean slate).
-///   3. Replay every event inside a single transaction.
-///   4. Commit and clear the dirty marker.
+/// The entire operation — DROP, CREATE, replay — is wrapped in a single SQLite
+/// transaction so that a mid-replay failure leaves the original data intact.
 pub fn rebuild(dir: &Utf8Path, project_id: &str) -> Result<(), CcxError> {
-    use fd_lock::RwLock;
-    use std::fs::OpenOptions;
-
     std::fs::create_dir_all(dir)?;
 
-    // Step 1: hold the events.lock for the duration of the rebuild so no
-    // concurrent append can add events between the snapshot and the replay.
+    // Hold events.lock exclusively for the whole rebuild so no concurrent append
+    // can add events between the JSONL snapshot and the replay.
     let lock_path = dir.join("events.lock");
     let lock_file = OpenOptions::new()
         .create(true)
@@ -30,7 +26,6 @@ pub fn rebuild(dir: &Utf8Path, project_id: &str) -> Result<(), CcxError> {
     let mut rw_lock = RwLock::new(lock_file);
     let _guard = rw_lock.write()?;
 
-    // Step 2: read events under the lock.
     let events = read_events_from_dir(dir)?;
     if events.is_empty() {
         tracing::warn!(
@@ -40,26 +35,20 @@ pub fn rebuild(dir: &Utf8Path, project_id: &str) -> Result<(), CcxError> {
         );
     }
 
-    // Step 3: wipe and reinitialise the DB inside a savepoint so that a partial
-    // failure between DROP and CREATE doesn't leave the schema half-destroyed.
     let mut conn = open_db(dir)?;
-    conn.execute_batch("SAVEPOINT wipe_and_recreate")?;
-    if let Err(e) = wipe_tables(&conn).and_then(|_| run_migrations(&conn)) {
-        conn.execute_batch("ROLLBACK TO SAVEPOINT wipe_and_recreate")?;
-        return Err(e);
-    }
-    conn.execute_batch("RELEASE SAVEPOINT wipe_and_recreate")?;
 
-    // Step 4: replay inside a single transaction for performance.
+    // Single transaction: wipe tables → recreate schema → replay events.
+    // If any step fails the transaction rolls back, leaving the original rows intact.
     {
         let tx = conn.transaction()?;
+        wipe_tables(&tx)?;
+        run_migrations(&tx)?;
         for event in &events {
             apply_event_tx(&tx, event)?;
         }
         tx.commit()?;
     }
 
-    // Step 5: clear the dirty flag.
     clear_dirty(dir, &conn, project_id)?;
     Ok(())
 }
@@ -75,11 +64,20 @@ pub struct VerifyResult {
 
 /// Verify that the SQLite projection is up to date with `events.jsonl`.
 ///
-/// Cheap check: compare the last event_id in the JSONL file with
-/// `projects.last_applied_event_id`.  Also reports whether the dirty marker
-/// file is present.
+/// Holds a shared read lock on `events.lock` for the duration of both the JSONL
+/// read and the DB query to prevent a concurrent append from making the snapshot
+/// appear inconsistent even when it is not.
 pub fn verify(dir: &Utf8Path, project_id: &str) -> Result<VerifyResult, CcxError> {
     use crate::persistence::sqlite::is_dirty;
+
+    let lock_path = dir.join("events.lock");
+    let lock_file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(&lock_path)?;
+    let mut rw_lock = RwLock::new(lock_file);
+    let _guard = rw_lock.read()?;
 
     let events = read_events_from_dir(dir)?;
     let last_jsonl = events.last().map(|e| e.event_id.clone());
@@ -104,16 +102,14 @@ pub fn verify(dir: &Utf8Path, project_id: &str) -> Result<VerifyResult, CcxError
     })
 }
 
-/// Drop all user tables so `run_migrations` starts from a clean slate.
+/// Drop all user tables. Accepts `&Connection` or `&Transaction` via Deref coercion.
 fn wipe_tables(conn: &rusqlite::Connection) -> Result<(), CcxError> {
     conn.execute_batch(
-        "
-        DROP TABLE IF EXISTS merge_locks;
-        DROP TABLE IF EXISTS write_leases;
-        DROP TABLE IF EXISTS agent_sessions;
-        DROP TABLE IF EXISTS work_executions;
-        DROP TABLE IF EXISTS projects;
-        ",
+        "DROP TABLE IF EXISTS merge_locks;
+         DROP TABLE IF EXISTS write_leases;
+         DROP TABLE IF EXISTS agent_sessions;
+         DROP TABLE IF EXISTS work_executions;
+         DROP TABLE IF EXISTS projects;",
     )?;
     Ok(())
 }
@@ -142,7 +138,6 @@ mod tests {
         let dir = camino::Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
         let project_id = "01JTEST00000000000000000001";
 
-        // Write two events to JSONL.
         let e1 = make_registered(project_id);
         let e2 = Event::new(
             project_id,
@@ -157,16 +152,13 @@ mod tests {
         append_event_to_dir(&dir, &e1).unwrap();
         append_event_to_dir(&dir, &e2).unwrap();
 
-        // Mark dirty to simulate a prior projection failure.
         crate::persistence::sqlite::mark_dirty(&dir, project_id);
         assert!(crate::persistence::sqlite::is_dirty(&dir));
 
         rebuild(&dir, project_id).unwrap();
 
-        // Dirty flag should be cleared.
         assert!(!crate::persistence::sqlite::is_dirty(&dir));
 
-        // DB should reflect the replayed state.
         let conn = open_db(&dir).unwrap();
         let tsf: String = conn
             .query_row(
@@ -184,7 +176,6 @@ mod tests {
         let dir = camino::Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
         let project_id = "01JTEST00000000000000000001";
 
-        // append_event_to_dir auto-projects via try_project_event.
         let event = make_registered(project_id);
         append_event_to_dir(&dir, &event).unwrap();
 
@@ -202,8 +193,6 @@ mod tests {
         let dir = camino::Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
         let project_id = "01JTEST00000000000000000001";
 
-        // Append two events (both auto-projected), then roll back last_applied_event_id
-        // to the first event to simulate a missed projection.
         let e1 = make_registered(project_id);
         let e2 = Event::new(
             project_id,
@@ -218,7 +207,7 @@ mod tests {
         append_event_to_dir(&dir, &e1).unwrap();
         append_event_to_dir(&dir, &e2).unwrap();
 
-        // Simulate missed projection by rolling back last_applied_event_id.
+        // Roll back last_applied_event_id to simulate a missed projection.
         let conn = open_db(&dir).unwrap();
         conn.execute(
             "UPDATE projects SET last_applied_event_id = ?1 WHERE project_id = ?2",
