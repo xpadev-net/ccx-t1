@@ -1,7 +1,10 @@
 use crate::config::project_config::{CleanupPolicy, GhReviewHook, ProjectConfig};
 use crate::config::{ccx_home, project_dir};
-use crate::domain::event::generate_id;
+use crate::domain::event::{
+    Actor, Event, EventData, ProjectRegisteredPayload, generate_id,
+};
 use crate::error::CcxError;
+use crate::persistence::jsonl::append_event;
 use camino::Utf8PathBuf;
 use clap::Args;
 use std::fs;
@@ -57,6 +60,18 @@ pub fn register(args: RegisterArgs) -> Result<(), CcxError> {
         "canonical_repo": config.canonical_repo,
     }));
     fs::write(&index_path, serde_json::to_string_pretty(&index)?)?;
+
+    // Append audit event.
+    let event = Event::new(
+        &config.project_id,
+        Actor::Controller,
+        EventData::ProjectRegistered(ProjectRegisteredPayload {
+            display_slug: config.display_slug.clone(),
+            canonical_repo: config.canonical_repo.to_string(),
+            task_source_file: config.task_source_file.to_string(),
+        }),
+    );
+    append_event(&config.project_id, &event)?;
 
     println!("{}", serde_json::to_string_pretty(&config)?);
     Ok(())

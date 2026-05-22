@@ -2,6 +2,7 @@ mod cli;
 mod config;
 mod domain;
 mod error;
+mod persistence;
 
 use clap::{Parser, Subcommand};
 
