@@ -1,5 +1,6 @@
 use std::sync::Mutex;
 use ulid::{Generator, Ulid};
+use std::collections::HashMap;
 
 static ULID_GEN: Mutex<Option<Generator>> = Mutex::new(None);
 
@@ -45,4 +46,30 @@ pub enum EventType {
     UserIntervention,
     WorktreeCreated,
     BranchCreated,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Event {
+    pub event_id: String,
+    pub event_type: EventType,
+    pub timestamp: String,
+    pub actor: Actor,
+    pub project_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub work_execution_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<HashMap<String, serde_json::Value>>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Actor {
+    Controller,
+    Orchestrator,
+    Worker,
+    Reviewer,
+    Diagnostic,
+    System,
 }

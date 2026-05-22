@@ -39,6 +39,12 @@ pub enum CcxError {
     #[error("database error: {0}")]
     Database(String),
 
+    #[error("I/O error: {0}")]
+    IoError(String),
+
+    #[error("serialization error: {0}")]
+    SerializationError(String),
+
     #[error("{0}")]
     Other(#[from] anyhow::Error),
 }
