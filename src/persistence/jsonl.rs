@@ -22,8 +22,7 @@ impl JsonlEventLog {
     pub fn append(&self, event: &Event) -> Result<(), CcxError> {
         // Ensure parent directory exists
         if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| CcxError::IoError(e.to_string()))?;
+            std::fs::create_dir_all(parent)?;
         }
 
         // Serialize event to JSON
@@ -35,35 +34,29 @@ impl JsonlEventLog {
         let lock_file = OpenOptions::new()
             .create(true)
             .write(true)
-            .open(&lock_path)
-            .map_err(|e| CcxError::IoError(format!("Failed to open lock file: {}", e)))?;
+            .open(&lock_path)?;
 
         let mut lock = RwLock::new(lock_file);
-        let _write_guard = lock
-            .write()
-            .map_err(|e| CcxError::IoError(format!("Failed to acquire write lock: {}", e)))?;
+        let _write_guard = lock.write()
+            .map_err(|_| CcxError::Other(anyhow::anyhow!("Failed to acquire write lock")))?;
 
         // Open the JSONL file in append mode
         let file = OpenOptions::new()
             .create(true)
             .append(true)
-            .open(&self.path)
-            .map_err(|e| CcxError::IoError(format!("Failed to open JSONL file: {}", e)))?;
+            .open(&self.path)?;
 
         let mut writer = BufWriter::new(file);
 
         // Write JSON + newline
-        writeln!(writer, "{}", json)
-            .map_err(|e| CcxError::IoError(format!("Failed to write to JSONL: {}", e)))?;
+        writeln!(writer, "{}", json)?;
 
         // Flush and sync to ensure durability
-        writer.flush()
-            .map_err(|e| CcxError::IoError(format!("Failed to flush JSONL: {}", e)))?;
+        writer.flush()?;
 
         // Sync to disk
         if let Ok(file) = writer.into_inner() {
-            file.sync_all()
-                .map_err(|e| CcxError::IoError(format!("Failed to sync JSONL: {}", e)))?;
+            file.sync_all()?;
         }
 
         Ok(())
@@ -75,8 +68,7 @@ impl JsonlEventLog {
             return Ok(Vec::new());
         }
 
-        let content = std::fs::read_to_string(&self.path)
-            .map_err(|e| CcxError::IoError(format!("Failed to read JSONL: {}", e)))?;
+        let content = std::fs::read_to_string(&self.path)?;
 
         let mut events = Vec::new();
         for line in content.lines() {
@@ -102,6 +94,7 @@ mod tests {
     use super::*;
     use crate::domain::event::{Actor, EventType, generate_id};
     use chrono::Utc;
+    use std::collections::HashMap;
 
     #[test]
     fn test_append_and_read() {
@@ -150,5 +143,69 @@ mod tests {
 
         let events = log.read_all().unwrap();
         assert_eq!(events.len(), 5);
+    }
+
+    #[test]
+    fn test_read_nonexistent_file() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("nonexistent.jsonl");
+        let log = JsonlEventLog::new(&log_path);
+
+        let events = log.read_all().unwrap();
+        assert_eq!(events.len(), 0);
+    }
+
+    #[test]
+    fn test_append_with_context() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("events.jsonl");
+        let log = JsonlEventLog::new(&log_path);
+
+        let mut context = HashMap::new();
+        context.insert("key1".to_string(), serde_json::json!("value1"));
+        context.insert("key2".to_string(), serde_json::json!(42));
+
+        let event = Event {
+            event_id: generate_id().to_string(),
+            event_type: EventType::WorkExecutionCreated,
+            timestamp: Utc::now().to_rfc3339(),
+            actor: Actor::Controller,
+            project_id: "test-project".to_string(),
+            work_execution_id: Some("work-id".to_string()),
+            agent_session_id: Some("session-id".to_string()),
+            context: Some(context),
+        };
+
+        log.append(&event).unwrap();
+
+        let events = log.read_all().unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(events[0].context.is_some());
+        let ctx = events[0].context.as_ref().unwrap();
+        assert_eq!(ctx.get("key1").unwrap().as_str(), Some("value1"));
+        assert_eq!(ctx.get("key2").unwrap().as_i64(), Some(42));
+    }
+
+    #[test]
+    fn test_lock_file_created() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("events.jsonl");
+        let log = JsonlEventLog::new(&log_path);
+
+        let event = Event {
+            event_id: generate_id().to_string(),
+            event_type: EventType::ProjectRegistered,
+            timestamp: Utc::now().to_rfc3339(),
+            actor: Actor::Controller,
+            project_id: "test-project".to_string(),
+            work_execution_id: None,
+            agent_session_id: None,
+            context: None,
+        };
+
+        log.append(&event).unwrap();
+
+        let lock_path = log_path.with_extension("lock");
+        assert!(lock_path.exists());
     }
 }
