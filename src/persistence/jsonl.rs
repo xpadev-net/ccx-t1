@@ -41,6 +41,13 @@ pub fn append_event_to_dir(dir: &Utf8Path, event: &Event) -> Result<(), CcxError
     log_file.flush()?;
     log_file.sync_all()?;
 
+    // Release the events.lock before the SQLite projection so concurrent appenders
+    // are not blocked during DB I/O. JSONL durability is already guaranteed above.
+    drop(_guard);
+
+    // Best-effort SQLite projection — JSONL write already succeeded.
+    crate::persistence::projector::try_project_event(dir, event);
+
     Ok(())
 }
 
