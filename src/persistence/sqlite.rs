@@ -117,7 +117,7 @@ pub fn open_db(dir: &Utf8Path) -> Result<Connection, CcxError> {
     std::fs::create_dir_all(dir)?;
     let db_path = dir.join("state.sqlite");
     let conn = Connection::open(db_path.as_std_path())?;
-    conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+    conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;")?;
     run_migrations(&conn)?;
     Ok(conn)
 }
