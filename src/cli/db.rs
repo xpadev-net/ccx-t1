@@ -56,5 +56,12 @@ pub fn run_verify(args: VerifyArgs) -> Result<(), CcxError> {
             eprintln!("warning: SQLite is out of sync — run `ccx db rebuild --project-id {}`", args.project_id);
         }
     }
+
+    if !result.consistent {
+        return Err(CcxError::Other(anyhow::anyhow!(
+            "SQLite projection is out of sync with events.jsonl for project {}",
+            args.project_id
+        )));
+    }
     Ok(())
 }
