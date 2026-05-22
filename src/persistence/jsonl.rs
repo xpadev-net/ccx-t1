@@ -41,6 +41,9 @@ pub fn append_event_to_dir(dir: &Utf8Path, event: &Event) -> Result<(), CcxError
     log_file.flush()?;
     log_file.sync_all()?;
 
+    // Best-effort SQLite projection — JSONL write already succeeded.
+    crate::persistence::projector::try_project_event(dir, event);
+
     Ok(())
 }
 
