@@ -1,0 +1,31 @@
+#!/bin/bash
+set -e
+
+echo "=== Running gh-review-hook (Phase 2 checks) ==="
+
+# Check that cargo build succeeds
+echo "[1/3] Running cargo build..."
+cargo build > /dev/null 2>&1 || {
+    echo "❌ cargo build failed"
+    exit 2
+}
+echo "✓ cargo build passed"
+
+# Check that all tests pass
+echo "[2/3] Running cargo test..."
+cargo test --lib > /dev/null 2>&1 || {
+    echo "❌ cargo test failed"
+    exit 2
+}
+echo "✓ cargo test passed"
+
+# Check that there are no uncommitted changes
+echo "[3/3] Checking for uncommitted changes..."
+if git status --porcelain | grep -v "^??"; then
+    echo "❌ Uncommitted changes detected"
+    exit 2
+fi
+echo "✓ No uncommitted changes"
+
+echo "=== ✓ All checks passed ==="
+exit 0
