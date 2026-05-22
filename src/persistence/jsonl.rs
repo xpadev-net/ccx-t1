@@ -34,6 +34,7 @@ impl JsonlEventLog {
         let lock_file = OpenOptions::new()
             .create(true)
             .write(true)
+            .truncate(false)
             .open(&lock_path)?;
 
         let mut lock = RwLock::new(lock_file);
