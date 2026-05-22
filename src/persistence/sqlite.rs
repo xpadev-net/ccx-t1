@@ -140,7 +140,14 @@ pub fn mark_dirty(dir: &Utf8Path, project_id: &str) {
     if let Some(parent) = marker.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let _ = std::fs::write(&marker, b"dirty");
+    if let Err(e) = std::fs::write(&marker, b"dirty") {
+        tracing::warn!(
+            error = %e,
+            path = %marker,
+            project_id,
+            "mark_dirty: failed to write dirty marker file — dirty state may be lost"
+        );
+    }
 
     // Best-effort: update the DB column if the DB is reachable.
     if let Ok(conn) = Connection::open(dir.join("state.sqlite").as_std_path()) {

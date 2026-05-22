@@ -4,6 +4,7 @@ use crate::error::CcxError;
 use crate::persistence::jsonl::read_events_from_dir;
 use crate::persistence::projector::apply_event_tx;
 use crate::persistence::sqlite::{clear_dirty, open_db, run_migrations};
+use rusqlite::OptionalExtension;
 
 /// Rebuild the SQLite read model from scratch by replaying all events in `events.jsonl`.
 ///
@@ -31,11 +32,23 @@ pub fn rebuild(dir: &Utf8Path, project_id: &str) -> Result<(), CcxError> {
 
     // Step 2: read events under the lock.
     let events = read_events_from_dir(dir)?;
+    if events.is_empty() {
+        tracing::warn!(
+            project_id,
+            dir = %dir,
+            "rebuild: events.jsonl is absent or empty — 0 events replayed; DB will be empty"
+        );
+    }
 
-    // Step 3: wipe and reinitialise the DB.
+    // Step 3: wipe and reinitialise the DB inside a savepoint so that a partial
+    // failure between DROP and CREATE doesn't leave the schema half-destroyed.
     let mut conn = open_db(dir)?;
-    wipe_tables(&conn)?;
-    run_migrations(&conn)?;
+    conn.execute_batch("SAVEPOINT wipe_and_recreate")?;
+    if let Err(e) = wipe_tables(&conn).and_then(|_| run_migrations(&conn)) {
+        conn.execute_batch("ROLLBACK TO SAVEPOINT wipe_and_recreate")?;
+        return Err(e);
+    }
+    conn.execute_batch("RELEASE SAVEPOINT wipe_and_recreate")?;
 
     // Step 4: replay inside a single transaction for performance.
     {
@@ -80,7 +93,7 @@ pub fn verify(dir: &Utf8Path, project_id: &str) -> Result<VerifyResult, CcxError
             rusqlite::params![project_id],
             |row| row.get(0),
         )
-        .unwrap_or(None);
+        .optional()?;
 
     let consistent = !marker_present && last_jsonl == last_applied;
     Ok(VerifyResult {

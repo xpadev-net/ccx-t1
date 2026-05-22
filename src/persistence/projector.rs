@@ -38,10 +38,16 @@ pub fn try_project_event(dir: &Utf8Path, event: &Event) {
 /// Used by both `project_event` (one-event path) and rebuild (bulk-replay path).
 pub fn apply_event_tx(tx: &rusqlite::Transaction<'_>, event: &Event) -> Result<(), CcxError> {
     apply_event_data(tx, event)?;
-    tx.execute(
+    let rows = tx.execute(
         "UPDATE projects SET last_applied_event_id = ?1 WHERE project_id = ?2",
         params![event.event_id, event.project_id],
     )?;
+    if rows == 0 {
+        return Err(CcxError::Database(format!(
+            "project row not found for project_id={} while projecting event {} — events may be out of order",
+            event.project_id, event.event_id
+        )));
+    }
     Ok(())
 }
 
