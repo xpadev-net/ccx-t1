@@ -27,7 +27,10 @@ pub fn validate_transition(
         (WorkExecutionState::MergeReady, WorkExecutionState::Merging) => true,
         (WorkExecutionState::Merging, WorkExecutionState::Merged) => true,
 
-        // Post-merge follow-up
+        // Post-merge follow-up.
+        // FollowupRequired is semi-terminal: no further outbound transitions are
+        // defined in spec section 3.2. The only exits are the (_, Hold) / (_, Canceled)
+        // wildcards below, which apply to all states.
         (WorkExecutionState::Merged, WorkExecutionState::FollowupRequired) => true,
 
         // Return flow
@@ -95,6 +98,7 @@ mod tests {
             (GateCheck, MergeReady),
             (MergeReady, Merging),
             (Merging, Merged),
+            (Merged, FollowupRequired),
         ];
         for (from, to) in chain {
             assert!(validate_transition(from, to).is_ok(), "{from} → {to} should be valid");
