@@ -144,10 +144,13 @@ pub fn run_merge(cmd: MergeCommand) -> Result<(), crate::error::CcxError> {
 pub enum RecoveryCommand {
     /// Generate a recovery / integrity digest for a project
     Digest(recovery::DigestArgs),
+    /// Evaluate Circuit Breaker thresholds and auto-transition to Hold if exceeded
+    CircuitCheck(recovery::CircuitCheckArgs),
 }
 
 pub fn run_recovery(cmd: RecoveryCommand) -> Result<(), crate::error::CcxError> {
     match cmd {
         RecoveryCommand::Digest(args) => recovery::digest(args),
+        RecoveryCommand::CircuitCheck(args) => recovery::circuit_check(args),
     }
 }
