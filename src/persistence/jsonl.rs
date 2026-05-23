@@ -51,6 +51,57 @@ pub fn append_event_to_dir(dir: &Utf8Path, event: &Event) -> Result<(), CcxError
     Ok(())
 }
 
+/// Execute an atomic read-evaluate-write operation on the event log.
+///
+/// Acquires the write lock, reads the current events, passes them to `f`,
+/// and — if `f` returns `Some(event)` — appends that event before releasing
+/// the lock. This guarantees that the check and the write are serialized with
+/// respect to all other callers that go through `append_event_to_dir`.
+///
+/// The SQLite projection runs after the lock is released (best-effort, as usual).
+pub fn locked_read_write<F>(dir: &Utf8Path, f: F) -> Result<(), CcxError>
+where
+    F: FnOnce(&[Event]) -> Result<Option<Event>, CcxError>,
+{
+    std::fs::create_dir_all(dir)?;
+
+    let lock_path = dir.join("events.lock");
+    let log_path = dir.join("events.jsonl");
+
+    let lock_file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(&lock_path)?;
+    let mut rw_lock = RwLock::new(lock_file);
+    let _guard = rw_lock.write()?;
+
+    // Read current events under the lock (std::fs::read_to_string does not
+    // acquire the advisory lock again — it just opens the file for reading).
+    let events = read_events_from_dir(dir)?;
+    let maybe_event = f(&events)?;
+
+    if let Some(ref event) = maybe_event {
+        let mut line = serde_json::to_string(event)?;
+        line.push('\n');
+        let mut log_file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)?;
+        log_file.write_all(line.as_bytes())?;
+        log_file.flush()?;
+        log_file.sync_all()?;
+    }
+
+    // Release the write lock before the SQLite projection.
+    drop(_guard);
+
+    if let Some(event) = maybe_event {
+        crate::persistence::projector::try_project_event(dir, &event);
+    }
+    Ok(())
+}
+
 /// Append a single `Event` to the project's canonical `events.jsonl`.
 pub fn append_event(project_id: &str, event: &Event) -> Result<(), CcxError> {
     let dir = project_dir(project_id)?;

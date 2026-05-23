@@ -6,7 +6,7 @@ use crate::domain::event::{Actor, Event, EventData, WorkExecutionStateChangedPay
 use crate::domain::transition::validate_transition;
 use crate::domain::work_execution::WorkExecutionState;
 use crate::error::CcxError;
-use crate::persistence::jsonl::{append_event_to_dir, read_events_from_dir};
+use crate::persistence::jsonl::{locked_read_write, read_events_from_dir};
 use crate::persistence::sqlite::open_db;
 
 pub struct CircuitBreakerConfig {
@@ -109,10 +109,13 @@ fn elapsed_hours(selected_at: &str) -> Result<f64, CcxError> {
         .map_err(|e| CcxError::Database(format!("invalid selected_at timestamp: {e}")))?;
     let now = Utc::now();
     let delta = now - ts.with_timezone(&Utc);
-    Ok(delta.num_seconds() as f64 / 3600.0)
+    // Clamp to 0 so future-dated selected_at (clock skew) does not produce a
+    // negative elapsed time in the output.
+    Ok(delta.num_seconds().max(0) as f64 / 3600.0)
 }
 
 pub fn evaluate(config: &CircuitBreakerConfig, dir: &Utf8Path) -> Result<CircuitBreakerResult, CcxError> {
+    // Read events once for the failure count (uncontended read-only use).
     let events = read_events_from_dir(dir)?;
     let retry_count = count_failures(&events, &config.work_execution_id);
 
@@ -141,27 +144,32 @@ pub fn evaluate(config: &CircuitBreakerConfig, dir: &Utf8Path) -> Result<Circuit
     };
 
     if triggered {
-        // Use JSONL-derived state as the authoritative current state.
-        // SQLite is a best-effort projection that may lag behind, so reading it
-        // for the idempotency check could allow duplicate Hold events when the
-        // projection failed after a prior Hold was appended to JSONL.
-        let current = match current_state_from_events(&events, &config.work_execution_id) {
-            Some(s) => s,
-            None => query_current_state(&conn, &config.work_execution_id)?,
-        };
-        if current != WorkExecutionState::Hold {
+        // Perform the check-then-write under the events.lock to prevent a TOCTOU
+        // race where two concurrent `circuit-check` invocations both observe the
+        // pre-Hold state and both append a Hold event.
+        let project_id = config.project_id.clone();
+        let work_execution_id = config.work_execution_id.clone();
+        locked_read_write(dir, |latest_events| {
+            // Re-derive state from the freshly-read (under-lock) event stream.
+            // Fall back to SQLite only when no state-change event exists yet.
+            let current = match current_state_from_events(latest_events, &work_execution_id) {
+                Some(s) => s,
+                None => query_current_state(&conn, &work_execution_id)?,
+            };
+            if current == WorkExecutionState::Hold {
+                return Ok(None); // already in Hold — idempotent no-op
+            }
             validate_transition(current, WorkExecutionState::Hold)?;
-            let event = Event::new(
-                &config.project_id,
+            Ok(Some(Event::new(
+                &project_id,
                 Actor::Controller,
                 EventData::WorkExecutionStateChanged(WorkExecutionStateChangedPayload {
-                    work_execution_id: config.work_execution_id.clone(),
+                    work_execution_id: work_execution_id.clone(),
                     from: current,
                     to: WorkExecutionState::Hold,
                 }),
-            );
-            append_event_to_dir(dir, &event)?;
-        }
+            )))
+        })?;
     }
 
     Ok(CircuitBreakerResult {

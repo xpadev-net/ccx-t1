@@ -47,6 +47,10 @@ pub struct RecoveryDigest {
 const LEASE_STALE_SECS: i64 = 300;
 /// Merge locks stale after 30 minutes without a heartbeat.
 const LOCK_STALE_SECS: i64 = 1800;
+/// Sentinel returned for corrupted/unparseable timestamps (~317 years).
+/// Large enough to always trigger the stale threshold, small enough to be
+/// interpretable in JSON output without overflow surprises.
+const STALE_SECS_CORRUPTED: i64 = 10_000_000_000;
 
 struct ActiveSession {
     agent_session_id: String,
@@ -88,9 +92,9 @@ fn query_active_sessions(
 
 fn stale_seconds(last_heartbeat_at: &str, now: &DateTime<Utc>) -> i64 {
     match DateTime::parse_from_rfc3339(last_heartbeat_at) {
-        // A corrupted or missing timestamp is treated as maximally stale so it
-        // surfaces in the digest rather than being silently hidden.
-        Err(_) => i64::MAX,
+        // A corrupted timestamp is treated as maximally stale (STALE_SECS_CORRUPTED)
+        // so it surfaces in the digest rather than being silently hidden.
+        Err(_) => STALE_SECS_CORRUPTED,
         // Clamp negative values (future-dated timestamps / clock skew) to 0
         // to avoid false positives without hiding genuinely stale entries.
         Ok(ts) => (*now - ts.with_timezone(&Utc)).num_seconds().max(0),
@@ -223,9 +227,10 @@ mod tests {
     }
 
     #[test]
-    fn stale_seconds_corrupted_timestamp_is_max() {
+    fn stale_seconds_corrupted_timestamp_is_sentinel() {
         let secs = stale_seconds("not-a-timestamp", &Utc::now());
-        assert_eq!(secs, i64::MAX);
+        assert_eq!(secs, STALE_SECS_CORRUPTED);
+        assert!(secs >= LEASE_STALE_SECS); // always triggers stale threshold
     }
 
     #[test]
