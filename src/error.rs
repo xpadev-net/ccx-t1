@@ -48,3 +48,9 @@ impl From<rusqlite::Error> for CcxError {
         CcxError::Database(e.to_string())
     }
 }
+
+impl From<notify::Error> for CcxError {
+    fn from(e: notify::Error) -> Self {
+        CcxError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+    }
+}
