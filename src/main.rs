@@ -2,6 +2,7 @@ mod cli;
 mod config;
 mod domain;
 mod error;
+mod git;
 mod persistence;
 mod watcher;
 
