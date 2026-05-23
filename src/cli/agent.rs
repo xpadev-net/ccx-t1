@@ -139,10 +139,12 @@ pub fn stop(args: StopArgs) -> Result<(), CcxError> {
             |row| row.get(0),
         )
         .map_err(|e| {
-            CcxError::Other(anyhow::anyhow!(
-                "agent session not found {}: {e}",
-                args.session_id
-            ))
+            let msg = if e == rusqlite::Error::QueryReturnedNoRows {
+                format!("agent session not found: {}", args.session_id)
+            } else {
+                format!("failed to query agent session {}: {e}", args.session_id)
+            };
+            CcxError::Other(anyhow::anyhow!("{msg}"))
         })?;
 
     // Write the event first so the record is durable before any destructive action.
@@ -209,10 +211,12 @@ pub fn notify(args: NotifyArgs) -> Result<(), CcxError> {
             |row| row.get(0),
         )
         .map_err(|e| {
-            CcxError::Other(anyhow::anyhow!(
-                "agent session not found {}: {e}",
-                args.session_id
-            ))
+            let msg = if e == rusqlite::Error::QueryReturnedNoRows {
+                format!("agent session not found: {}", args.session_id)
+            } else {
+                format!("failed to query agent session {}: {e}", args.session_id)
+            };
+            CcxError::Other(anyhow::anyhow!("{msg}"))
         })?;
 
     let cmux = make_adapter();
