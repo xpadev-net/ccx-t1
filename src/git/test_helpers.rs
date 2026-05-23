@@ -9,19 +9,21 @@ pub fn init_repo(tmp: &tempfile::TempDir) -> Utf8PathBuf {
         vec!["config", "user.email", "test@test.com"],
         vec!["config", "user.name", "Test"],
     ] {
-        std::process::Command::new("git")
+        let out = std::process::Command::new("git")
             .args(&cmd)
             .current_dir(&dir)
             .output()
             .unwrap();
+        assert!(out.status.success(), "git {:?} failed: {}", cmd, String::from_utf8_lossy(&out.stderr));
     }
     std::fs::write(dir.join("README"), b"init").unwrap();
     for cmd in [vec!["add", "."], vec!["commit", "-m", "init"]] {
-        std::process::Command::new("git")
+        let out = std::process::Command::new("git")
             .args(&cmd)
             .current_dir(&dir)
             .output()
             .unwrap();
+        assert!(out.status.success(), "git {:?} failed: {}", cmd, String::from_utf8_lossy(&out.stderr));
     }
     dir
 }
