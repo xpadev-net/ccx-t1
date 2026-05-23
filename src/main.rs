@@ -1,10 +1,12 @@
 mod agent_runtime;
+mod breaker;
 mod cli;
 mod config;
 mod domain;
 mod error;
 mod git;
 mod persistence;
+mod recovery;
 mod watcher;
 
 use clap::{Parser, Subcommand};
