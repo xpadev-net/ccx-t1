@@ -120,7 +120,12 @@ impl SocketCmuxAdapter {
 
         let mut reader = BufReader::new(&stream);
         let mut response_line = String::new();
-        reader.read_line(&mut response_line)?;
+        let n = reader.read_line(&mut response_line)?;
+        if n == 0 {
+            return Err(CcxError::Other(anyhow::anyhow!(
+                "cmux: server closed connection without sending a response"
+            )));
+        }
 
         let response: serde_json::Value =
             serde_json::from_str(response_line.trim()).map_err(|e| {
@@ -414,15 +419,15 @@ mod tests {
     fn make_adapter_from_returns_socket_when_file_exists() {
         let dir = tempfile::tempdir().unwrap();
         let path = sock_path(&dir);
-        // Create the socket file so metadata check succeeds
-        let _listener = UnixListener::bind(&path).unwrap();
+        let listener = UnixListener::bind(&path).unwrap();
+        // Accept one connection and immediately drop it — causes instant EOF
+        // on the client's read_line rather than waiting for RPC_IO_TIMEOUT.
+        thread::spawn(move || {
+            let _ = listener.accept();
+        });
         let adapter = make_adapter_from(&path);
-        // Confirm it's a SocketCmuxAdapter by checking that calling it connects
-        // (it will fail since nobody is responding, but the error is a connect/IO error
-        // rather than a headless sentinel)
         let result = adapter.ensure_workspace("proj-x", "slug", "/repo");
-        // The listener is not responding so we'll get an error — that's expected;
-        // what matters is the adapter tried to connect (not returning a headless ID).
+        // EOF → "server closed connection" error, not a headless sentinel
         assert!(
             result.is_err() || !result.as_ref().unwrap().starts_with("headless-"),
             "socket adapter should not return a headless sentinel"
