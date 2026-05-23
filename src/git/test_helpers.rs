@@ -8,6 +8,7 @@ pub fn init_repo(tmp: &tempfile::TempDir) -> Utf8PathBuf {
         vec!["init"],
         vec!["config", "user.email", "test@test.com"],
         vec!["config", "user.name", "Test"],
+        vec!["config", "commit.gpgsign", "false"],
     ] {
         let out = std::process::Command::new("git")
             .args(&cmd)
