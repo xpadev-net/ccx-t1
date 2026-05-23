@@ -97,8 +97,14 @@ fn run_heartbeat_loop(
             break;
         }
 
-        let pid = tmux.get_pane_pid(&config.agent_session_id).unwrap_or(None);
-        let cwd = tmux.get_pane_cwd(&config.agent_session_id).unwrap_or(None);
+        let pid = tmux.get_pane_pid(&config.agent_session_id).unwrap_or_else(|e| {
+            warn!("get_pane_pid error for {}: {e}", config.agent_session_id);
+            None
+        });
+        let cwd = tmux.get_pane_cwd(&config.agent_session_id).unwrap_or_else(|e| {
+            warn!("get_pane_cwd error for {}: {e}", config.agent_session_id);
+            None
+        });
 
         let event = Event::new(
             &config.project_id,
@@ -130,14 +136,27 @@ mod tests {
     use std::sync::Mutex;
 
     struct MockTmuxAdapter {
-        // Use VecDeque so pop_front() matches left-to-right call order.
-        exists_responses: Mutex<VecDeque<bool>>,
+        // VecDeque so pop_front() matches left-to-right call order.
+        // Each entry is the full Result the mock returns for that call.
+        exists_responses: Mutex<VecDeque<Result<bool, CcxError>>>,
         pid: Option<u32>,
         cwd: Option<String>,
     }
 
     impl MockTmuxAdapter {
         fn new(exists_sequence: Vec<bool>, pid: Option<u32>, cwd: Option<String>) -> Self {
+            Self {
+                exists_responses: Mutex::new(exists_sequence.into_iter().map(Ok).collect()),
+                pid,
+                cwd,
+            }
+        }
+
+        fn with_results(
+            exists_sequence: Vec<Result<bool, CcxError>>,
+            pid: Option<u32>,
+            cwd: Option<String>,
+        ) -> Self {
             Self {
                 exists_responses: Mutex::new(exists_sequence.into()),
                 pid,
@@ -159,7 +178,8 @@ mod tests {
             Ok(())
         }
         fn session_exists(&self, _session_id: &str) -> Result<bool, CcxError> {
-            Ok(self.exists_responses.lock().unwrap().pop_front().unwrap_or(false))
+            self.exists_responses.lock().unwrap().pop_front()
+                .expect("MockTmuxAdapter: session_exists called more times than expected")
         }
         fn get_pane_pid(&self, _session_id: &str) -> Result<Option<u32>, CcxError> {
             Ok(self.pid)
@@ -246,6 +266,45 @@ mod tests {
             !events.iter().any(|e| matches!(e.data, EventData::AgentSessionStopped(_))),
             "no stopped event expected when session is alive on shutdown"
         );
+    }
+
+    #[test]
+    fn session_exists_error_skips_iteration_without_false_stopped_event() {
+        let (_tmp, dir) = make_dir();
+
+        // First call returns Err (transient failure) — the loop should skip that
+        // iteration without emitting AgentSessionStopped.  The second returns alive,
+        // the third dead, so we expect exactly 1 heartbeat then 1 stopped.
+        let mock = Arc::new(MockTmuxAdapter::with_results(
+            vec![
+                Err(CcxError::Other(anyhow::anyhow!("simulated tmux error"))),
+                Ok(true),
+                Ok(false),
+            ],
+            None,
+            None,
+        ));
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let config = HeartbeatConfig {
+            project_id: "01JTEST00000000000000000001".into(),
+            project_dir: dir.clone(),
+            agent_session_id: "sess-004".into(),
+            heartbeat_interval: Duration::from_millis(1),
+        };
+
+        let handle = spawn_heartbeat(config, mock, Arc::clone(&shutdown));
+        handle.join().unwrap();
+
+        let events = read_events_from_dir(&dir).unwrap();
+        assert_eq!(events.len(), 2, "expected 1 heartbeat + 1 stopped (Err skipped)");
+        assert!(
+            matches!(events[0].data, EventData::AgentSessionHeartbeat(_)),
+            "first event should be heartbeat"
+        );
+        match &events[1].data {
+            EventData::AgentSessionStopped(p) => assert_eq!(p.agent_session_id, "sess-004"),
+            other => panic!("expected stopped, got {other:?}"),
+        }
     }
 
     #[test]

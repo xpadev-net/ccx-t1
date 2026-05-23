@@ -128,7 +128,19 @@ impl TmuxAdapter for ShellTmuxAdapter {
         let output = Command::new("tmux")
             .args(["has-session", "-t", &target])
             .output()?;
-        Ok(output.status.success())
+        if output.status.success() {
+            return Ok(true);
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // Treat known "absent" messages as Ok(false); propagate everything else as Err
+        // so callers can distinguish "session gone" from "tmux broken".
+        if stderr.contains("can't find session") || stderr.contains("no server running") {
+            return Ok(false);
+        }
+        Err(CcxError::Other(anyhow::anyhow!(
+            "tmux has-session failed: {}",
+            stderr.trim()
+        )))
     }
 
     fn get_pane_pid(&self, session_id: &str) -> Result<Option<u32>, CcxError> {
