@@ -78,7 +78,7 @@ pub struct CircuitCheckArgs {
     /// Transition to Hold after this many Failed landings (default: 3).
     #[arg(long, default_value = "3")]
     pub max_retries: u32,
-    /// Transition to Hold after this many hours since creation (default: 24).
+    /// Transition to Hold after this many hours since selected_at (work execution creation time, default: 24).
     #[arg(long, default_value = "24")]
     pub max_hours: u64,
     #[arg(long)]
@@ -99,6 +99,7 @@ pub fn circuit_check(args: CircuitCheckArgs) -> Result<(), CcxError> {
         println!("{}", serde_json::to_string_pretty(&result)?);
     } else {
         println!("work_execution_id: {}", result.work_execution_id);
+        println!("threshold_met:     {}", result.threshold_met);
         println!("triggered:         {}", result.triggered);
         println!("retry_count:       {}", result.retry_count);
         println!("elapsed_hours:     {:.1}", result.elapsed_hours);
