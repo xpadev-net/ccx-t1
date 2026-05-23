@@ -54,20 +54,29 @@ struct ActiveSession {
 
 fn tmux_session_exists(agent_session_id: &str) -> bool {
     let target = format!("=ccx-{agent_session_id}");
-    Command::new("tmux")
+    match Command::new("tmux")
         .args(["has-session", "-t", &target])
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    {
+        Ok(o) => o.status.success(),
+        Err(e) => {
+            // tmux binary unavailable or permission error: assume session alive
+            // to avoid flooding the digest with false orphan reports.
+            tracing::warn!(error = %e, agent_session_id, "tmux unavailable; skipping orphan check for session");
+            true
+        }
+    }
 }
 
 fn query_active_sessions(
     conn: &Connection,
     project_id: &str,
 ) -> Result<Vec<ActiveSession>, CcxError> {
+    // Include 'lost' — the spec designates it as a primary recovery signal that
+    // should be cross-checked against the live tmux session.
     let mut stmt = conn.prepare(
         "SELECT agent_session_id FROM agent_sessions
-         WHERE project_id = ?1 AND state IN ('starting', 'running', 'idle', 'hung')",
+         WHERE project_id = ?1 AND state IN ('starting', 'running', 'idle', 'hung', 'lost')",
     )?;
     let rows = stmt
         .query_map(rusqlite::params![project_id], |row| {
@@ -78,9 +87,14 @@ fn query_active_sessions(
 }
 
 fn stale_seconds(last_heartbeat_at: &str, now: &DateTime<Utc>) -> i64 {
-    DateTime::parse_from_rfc3339(last_heartbeat_at)
-        .map(|ts| (*now - ts.with_timezone(&Utc)).num_seconds())
-        .unwrap_or(0)
+    match DateTime::parse_from_rfc3339(last_heartbeat_at) {
+        // A corrupted or missing timestamp is treated as maximally stale so it
+        // surfaces in the digest rather than being silently hidden.
+        Err(_) => i64::MAX,
+        // Clamp negative values (future-dated timestamps / clock skew) to 0
+        // to avoid false positives without hiding genuinely stale entries.
+        Ok(ts) => (*now - ts.with_timezone(&Utc)).num_seconds().max(0),
+    }
 }
 
 fn query_stale_leases(
@@ -206,5 +220,18 @@ mod tests {
         let then = Utc::now() - chrono::Duration::seconds(400);
         let secs = stale_seconds(&then.to_rfc3339(), &Utc::now());
         assert!(secs >= 399 && secs <= 401);
+    }
+
+    #[test]
+    fn stale_seconds_corrupted_timestamp_is_max() {
+        let secs = stale_seconds("not-a-timestamp", &Utc::now());
+        assert_eq!(secs, i64::MAX);
+    }
+
+    #[test]
+    fn stale_seconds_future_timestamp_clamps_to_zero() {
+        let future = (Utc::now() + chrono::Duration::seconds(3600)).to_rfc3339();
+        let secs = stale_seconds(&future, &Utc::now());
+        assert_eq!(secs, 0);
     }
 }

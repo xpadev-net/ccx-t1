@@ -45,6 +45,20 @@ fn count_failures(events: &[Event], work_execution_id: &str) -> u32 {
         .count() as u32
 }
 
+/// Derive the current state from the JSONL event stream (source of truth).
+/// Returns the `to` field of the last `WorkExecutionStateChanged` event for
+/// the given WE.  Returns `None` when no state-change event exists yet.
+fn current_state_from_events(events: &[Event], work_execution_id: &str) -> Option<WorkExecutionState> {
+    events.iter().rev().find_map(|e| {
+        if let EventData::WorkExecutionStateChanged(p) = &e.data {
+            if p.work_execution_id == work_execution_id {
+                return Some(p.to);
+            }
+        }
+        None
+    })
+}
+
 fn query_current_state(
     conn: &rusqlite::Connection,
     work_execution_id: &str,
@@ -127,8 +141,14 @@ pub fn evaluate(config: &CircuitBreakerConfig, dir: &Utf8Path) -> Result<Circuit
     };
 
     if triggered {
-        let current = query_current_state(&conn, &config.work_execution_id)?;
-        // Skip if already in Hold (idempotent)
+        // Use JSONL-derived state as the authoritative current state.
+        // SQLite is a best-effort projection that may lag behind, so reading it
+        // for the idempotency check could allow duplicate Hold events when the
+        // projection failed after a prior Hold was appended to JSONL.
+        let current = match current_state_from_events(&events, &config.work_execution_id) {
+            Some(s) => s,
+            None => query_current_state(&conn, &config.work_execution_id)?,
+        };
         if current != WorkExecutionState::Hold {
             validate_transition(current, WorkExecutionState::Hold)?;
             let event = Event::new(
@@ -188,6 +208,30 @@ mod tests {
             make_event(project_id, "01JTEST00000000000000000003", WorkExecutionState::Running, WorkExecutionState::Failed),
         ];
         assert_eq!(count_failures(&events, we_id), 2);
+    }
+
+    #[test]
+    fn current_state_from_events_returns_last_transition() {
+        let project_id = "01JTEST00000000000000000001";
+        let we_id = "01JTEST00000000000000000002";
+        let events = vec![
+            make_event(project_id, we_id, WorkExecutionState::Running, WorkExecutionState::Failed),
+            make_event(project_id, we_id, WorkExecutionState::Failed, WorkExecutionState::Dispatched),
+            make_event(project_id, we_id, WorkExecutionState::Dispatched, WorkExecutionState::Hold),
+        ];
+        assert_eq!(
+            current_state_from_events(&events, we_id),
+            Some(WorkExecutionState::Hold)
+        );
+    }
+
+    #[test]
+    fn current_state_from_events_none_when_no_events() {
+        let events: Vec<Event> = vec![];
+        assert_eq!(
+            current_state_from_events(&events, "01JTEST00000000000000000002"),
+            None
+        );
     }
 
     #[test]
