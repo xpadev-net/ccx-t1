@@ -2,6 +2,7 @@ use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
+use crate::agent_runtime::tmux_adapter::session_target;
 use crate::error::CcxError;
 
 pub enum PromptSource {
@@ -32,7 +33,7 @@ pub fn read_message(source: &PromptSource) -> Result<String, CcxError> {
 /// so multi-line text is delivered verbatim without tmux key-name expansion.
 pub fn send_to_tmux(session_id: &str, text: &str) -> Result<(), CcxError> {
     let buffer = format!("ccx-prompt-{session_id}");
-    let target = format!("=ccx-{session_id}");
+    let target = session_target(session_id);
 
     // Stage 1: load text into a named tmux buffer via stdin.
     // Pipe stderr so error output is captured for diagnostics.
