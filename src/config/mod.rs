@@ -1,5 +1,6 @@
 pub mod project_config;
 
+use crate::config::project_config::ProjectConfig;
 use crate::error::CcxError;
 use camino::Utf8PathBuf;
 use std::path::PathBuf;
@@ -29,4 +30,17 @@ fn validate_project_id(id: &str) -> Result<(), CcxError> {
 pub fn project_dir(project_id: &str) -> Result<Utf8PathBuf, CcxError> {
     validate_project_id(project_id)?;
     Ok(ccx_home()?.join("projects").join(project_id))
+}
+
+/// Load the project.json config for a given project_id.
+pub fn load_project_config(project_id: &str) -> Result<ProjectConfig, CcxError> {
+    let path = project_dir(project_id)?.join("project.json");
+    let raw = std::fs::read_to_string(&path).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            CcxError::ProjectNotFound { project_id: project_id.to_owned() }
+        } else {
+            CcxError::Io(e)
+        }
+    })?;
+    Ok(serde_json::from_str(&raw)?)
 }
