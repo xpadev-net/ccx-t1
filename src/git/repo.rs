@@ -52,16 +52,17 @@ pub fn check_dirty(repo: &Utf8Path) -> Result<Vec<DirtyEntry>, CcxError> {
 /// tracked files. Untracked files are left in place; call `git clean -fd`
 /// separately if you also need to remove them.
 pub fn reset_hard(repo: &Utf8Path) -> Result<(), CcxError> {
-    let status = std::process::Command::new("git")
+    let output = std::process::Command::new("git")
         .args(["reset", "--hard", "HEAD"])
         .current_dir(repo)
-        .status()
+        .output()
         .map_err(|e| CcxError::Git(format!("failed to run git reset: {e}")))?;
 
-    if !status.success() {
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(CcxError::Git(format!(
-            "git reset --hard HEAD exited with {:?}",
-            status.code()
+            "git reset --hard HEAD exited with {:?}: {stderr}",
+            output.status.code()
         )));
     }
     Ok(())
