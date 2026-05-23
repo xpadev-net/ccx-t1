@@ -23,6 +23,11 @@ pub fn validate_env_vars(envs: &HashMap<String, String>) -> Result<(), CcxError>
                 "env var key contains '=': {k:?}"
             )));
         }
+        if k.contains('\0') {
+            return Err(CcxError::Other(anyhow::anyhow!(
+                "env var key {k:?} contains NUL byte"
+            )));
+        }
         if v.contains('\0') {
             return Err(CcxError::Other(anyhow::anyhow!(
                 "env var value for {k:?} contains NUL byte"
@@ -214,6 +219,14 @@ mod tests {
         envs.insert("CCX_KEY=BAD".into(), "value".into());
         let err = validate_env_vars(&envs).unwrap_err().to_string();
         assert!(err.contains('='), "error should mention '=': {err}");
+    }
+
+    #[test]
+    fn validate_rejects_nul_in_key() {
+        let mut envs = HashMap::new();
+        envs.insert("CCX_KEY\0BAD".into(), "value".into());
+        let err = validate_env_vars(&envs).unwrap_err().to_string();
+        assert!(err.contains("NUL"), "error should mention NUL: {err}");
     }
 
     #[test]

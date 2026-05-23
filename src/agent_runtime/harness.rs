@@ -43,12 +43,37 @@ fn run_heartbeat_loop(
         std::thread::sleep(config.heartbeat_interval);
 
         if shutdown.load(Ordering::Acquire) {
+            // Emit a stopped event if the session already died before shutdown fired.
+            // If the session is still alive the caller owns teardown and must emit the event.
+            let still_alive = tmux
+                .session_exists(&config.agent_session_id)
+                .unwrap_or(true);
+            if !still_alive {
+                let event = Event::new(
+                    &config.project_id,
+                    Actor::System,
+                    EventData::AgentSessionStopped(AgentSessionStoppedPayload {
+                        agent_session_id: config.agent_session_id.clone(),
+                        exit_code: None,
+                    }),
+                );
+                if let Err(e) = append_event_to_dir(&config.project_dir, &event) {
+                    warn!(
+                        "failed to append AgentSessionStopped for {}: {e}",
+                        config.agent_session_id
+                    );
+                }
+            }
             break;
         }
 
-        let exists = tmux
-            .session_exists(&config.agent_session_id)
-            .unwrap_or(false);
+        let exists = match tmux.session_exists(&config.agent_session_id) {
+            Ok(v) => v,
+            Err(e) => {
+                warn!("session_exists error for {}: {e}", config.agent_session_id);
+                continue;
+            }
+        };
 
         if !exists {
             let event = Event::new(
@@ -193,11 +218,11 @@ mod tests {
     }
 
     #[test]
-    fn pre_set_shutdown_exits_without_any_events() {
+    fn shutdown_while_alive_emits_no_stopped_event() {
         let (_tmp, dir) = make_dir();
 
-        // shutdown is already true — the loop breaks on its first check.
-        let mock = Arc::new(MockTmuxAdapter::new(vec![], None, None));
+        // Session is still alive when shutdown fires → no AgentSessionStopped.
+        let mock = Arc::new(MockTmuxAdapter::new(vec![true], None, None));
         let shutdown = Arc::new(AtomicBool::new(true));
         let config = HeartbeatConfig {
             project_id: "01JTEST00000000000000000001".into(),
@@ -210,6 +235,34 @@ mod tests {
         handle.join().unwrap();
 
         let events = read_events_from_dir(&dir).unwrap();
-        assert!(events.is_empty(), "expected no events when shutdown is pre-set");
+        assert!(
+            !events.iter().any(|e| matches!(e.data, EventData::AgentSessionStopped(_))),
+            "no stopped event expected when session is alive on shutdown"
+        );
+    }
+
+    #[test]
+    fn shutdown_while_dead_emits_stopped_event() {
+        let (_tmp, dir) = make_dir();
+
+        // Session is already dead when shutdown fires → AgentSessionStopped is emitted.
+        let mock = Arc::new(MockTmuxAdapter::new(vec![false], None, None));
+        let shutdown = Arc::new(AtomicBool::new(true));
+        let config = HeartbeatConfig {
+            project_id: "01JTEST00000000000000000001".into(),
+            project_dir: dir.clone(),
+            agent_session_id: "sess-003".into(),
+            heartbeat_interval: Duration::from_millis(1),
+        };
+
+        let handle = spawn_heartbeat(config, mock, Arc::clone(&shutdown));
+        handle.join().unwrap();
+
+        let events = read_events_from_dir(&dir).unwrap();
+        assert_eq!(events.len(), 1);
+        match &events[0].data {
+            EventData::AgentSessionStopped(p) => assert_eq!(p.agent_session_id, "sess-003"),
+            other => panic!("expected stopped event, got {other:?}"),
+        }
     }
 }
