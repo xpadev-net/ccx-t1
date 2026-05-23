@@ -1,7 +1,15 @@
+use std::path::PathBuf;
+
 use clap::Args;
 
-use crate::domain::event::generate_id;
+use crate::agent_runtime::cmux_adapter::make_adapter;
+use crate::agent_runtime::lifecycle::{handle_lifecycle_stop, LifecycleStopConfig};
+use crate::agent_runtime::tmux_adapter::{ShellTmuxAdapter, TmuxAdapter};
+use crate::config::project_dir;
+use crate::domain::event::{generate_id, Actor, AgentSessionStoppedPayload, Event, EventData};
 use crate::error::CcxError;
+use crate::persistence::jsonl::append_event_to_dir;
+use crate::persistence::sqlite::open_db;
 
 // ---------------------------------------------------------------------------
 // agent start-orchestrator
@@ -113,12 +121,52 @@ pub fn prompt(args: PromptArgs) -> Result<(), CcxError> {
 #[derive(Debug, Args)]
 pub struct StopArgs {
     #[arg(long)]
+    pub project_id: String,
+    #[arg(long)]
     pub session_id: String,
     #[arg(long)]
     pub json: bool,
 }
 
 pub fn stop(args: StopArgs) -> Result<(), CcxError> {
+    let dir = project_dir(&args.project_id)?;
+    let conn = open_db(&dir)?;
+
+    let cmux_tab_id: String = conn
+        .query_row(
+            "SELECT cmux_tab_id FROM agent_sessions WHERE agent_session_id = ?1",
+            rusqlite::params![args.session_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| {
+            let msg = if e == rusqlite::Error::QueryReturnedNoRows {
+                format!("agent session not found: {}", args.session_id)
+            } else {
+                format!("failed to query agent session {}: {e}", args.session_id)
+            };
+            CcxError::Other(anyhow::anyhow!("{msg}"))
+        })?;
+
+    // Write the event first so the record is durable before any destructive action.
+    // If the event write fails, nothing has been destroyed and the caller can retry.
+    let event = Event::new(
+        &args.project_id,
+        Actor::Controller,
+        EventData::AgentSessionStopped(AgentSessionStoppedPayload {
+            agent_session_id: args.session_id.clone(),
+            exit_code: None,
+        }),
+    );
+    append_event_to_dir(&dir, &event)?;
+
+    let tmux = ShellTmuxAdapter;
+    let kill_result = tmux.kill_session(&args.session_id);
+    // close_tab is best-effort and runs unconditionally so the tab is cleaned up
+    // even when kill_session returns an unexpected error.
+    let cmux = make_adapter();
+    let _ = cmux.close_tab(&cmux_tab_id);
+    kill_result?;
+
     if args.json {
         println!(
             "{}",
@@ -128,7 +176,7 @@ pub fn stop(args: StopArgs) -> Result<(), CcxError> {
             }))?
         );
     } else {
-        println!("stopped {} (skeleton — not yet implemented)", args.session_id);
+        println!("stopped {}", args.session_id);
     }
     Ok(())
 }
@@ -139,6 +187,8 @@ pub fn stop(args: StopArgs) -> Result<(), CcxError> {
 
 #[derive(Debug, Args)]
 pub struct NotifyArgs {
+    #[arg(long)]
+    pub project_id: String,
     #[arg(long)]
     pub session_id: String,
     #[arg(long)]
@@ -151,6 +201,27 @@ pub struct NotifyArgs {
 }
 
 pub fn notify(args: NotifyArgs) -> Result<(), CcxError> {
+    let dir = project_dir(&args.project_id)?;
+    let conn = open_db(&dir)?;
+
+    let cmux_tab_id: String = conn
+        .query_row(
+            "SELECT cmux_tab_id FROM agent_sessions WHERE agent_session_id = ?1",
+            rusqlite::params![args.session_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| {
+            let msg = if e == rusqlite::Error::QueryReturnedNoRows {
+                format!("agent session not found: {}", args.session_id)
+            } else {
+                format!("failed to query agent session {}: {e}", args.session_id)
+            };
+            CcxError::Other(anyhow::anyhow!("{msg}"))
+        })?;
+
+    let cmux = make_adapter();
+    cmux.notify_user(&cmux_tab_id, &args.message, &args.level)?;
+
     if args.json {
         println!(
             "{}",
@@ -161,9 +232,59 @@ pub fn notify(args: NotifyArgs) -> Result<(), CcxError> {
             }))?
         );
     } else {
+        println!("[{}] {} -> {}", args.level, args.session_id, args.message);
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// agent lifecycle-stop
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Args)]
+pub struct LifecycleStopArgs {
+    #[arg(long)]
+    pub project_id: String,
+    #[arg(long)]
+    pub agent_session_id: String,
+    #[arg(long)]
+    pub work_execution_id: String,
+    /// Path to the task.md file for this work execution
+    #[arg(long)]
+    pub task_file: PathBuf,
+    /// Raw agent session ID of the orchestrator to notify (optional)
+    #[arg(long)]
+    pub orchestrator_session_id: Option<String>,
+    #[arg(long)]
+    pub json: bool,
+}
+
+pub fn lifecycle_stop(args: LifecycleStopArgs) -> Result<(), CcxError> {
+    let dir = project_dir(&args.project_id)?;
+
+    let config = LifecycleStopConfig {
+        project_id: args.project_id.clone(),
+        project_dir: dir,
+        agent_session_id: args.agent_session_id.clone(),
+        work_execution_id: args.work_execution_id.clone(),
+        task_file_path: args.task_file,
+        orchestrator_session_id: args.orchestrator_session_id,
+    };
+    handle_lifecycle_stop(&config)?;
+
+    if args.json {
         println!(
-            "[{}] {} -> {} (skeleton — not yet implemented)",
-            args.level, args.session_id, args.message
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "agent_session_id": args.agent_session_id,
+                "work_execution_id": args.work_execution_id,
+                "status": "lifecycle_stop_recorded",
+            }))?
+        );
+    } else {
+        println!(
+            "lifecycle_stop recorded for session {} work_execution {}",
+            args.agent_session_id, args.work_execution_id
         );
     }
     Ok(())

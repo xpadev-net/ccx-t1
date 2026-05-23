@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use camino::Utf8PathBuf;
 
 use crate::agent_runtime::cmux_adapter::{AgentSessionSpec, CmuxAdapter};
-use crate::agent_runtime::tmux_adapter::{session_name, TmuxAdapter};
+use crate::agent_runtime::tmux_adapter::{session_name, session_target, TmuxAdapter};
 use crate::domain::event::{Actor, AgentSessionCreatedPayload, Event, EventData};
 use crate::error::CcxError;
 use crate::persistence::jsonl::append_event_to_dir;
@@ -107,7 +107,7 @@ fn open_cmux_tab(spec: &LaunchSpec, cmux: &dyn CmuxAdapter) -> Result<(String, S
         work_execution_id: spec.work_execution_id.clone(),
         worktree_path: spec.worktree_path.clone(),
         envs: spec.envs.clone(),
-        startup_command: format!("tmux attach-session -t {}", session_name(&spec.agent_session_id)),
+        startup_command: format!("tmux attach-session -t {}", session_target(&spec.agent_session_id)),
     };
     let tab_id = cmux.create_agent_tab(&tab_spec)?;
     Ok((workspace_id, tab_id))

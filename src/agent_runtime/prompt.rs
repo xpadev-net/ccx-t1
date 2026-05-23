@@ -2,6 +2,7 @@ use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
+use crate::agent_runtime::tmux_adapter::session_target;
 use crate::error::CcxError;
 
 pub enum PromptSource {
@@ -32,7 +33,7 @@ pub fn read_message(source: &PromptSource) -> Result<String, CcxError> {
 /// so multi-line text is delivered verbatim without tmux key-name expansion.
 pub fn send_to_tmux(session_id: &str, text: &str) -> Result<(), CcxError> {
     let buffer = format!("ccx-prompt-{session_id}");
-    let target = format!("=ccx-{session_id}");
+    let target = session_target(session_id);
 
     // Stage 1: load text into a named tmux buffer via stdin.
     // Pipe stderr so error output is captured for diagnostics.
@@ -56,8 +57,13 @@ pub fn send_to_tmux(session_id: &str, text: &str) -> Result<(), CcxError> {
     let output = load
         .wait_with_output()
         .map_err(|e| CcxError::Other(anyhow::anyhow!("tmux load-buffer wait failed: {e}")))?;
-    write_result?;
+    if let Err(e) = write_result {
+        // Buffer may have been partially loaded; clean it up before returning.
+        let _ = delete_buffer(&buffer);
+        return Err(e);
+    }
     if !output.status.success() {
+        let _ = delete_buffer(&buffer);
         return Err(CcxError::Other(anyhow::anyhow!(
             "tmux load-buffer failed (exit {}): {}",
             output.status,
@@ -92,10 +98,17 @@ pub fn send_to_tmux(session_id: &str, text: &str) -> Result<(), CcxError> {
 }
 
 fn delete_buffer(buffer: &str) -> Result<(), CcxError> {
-    Command::new("tmux")
+    let output = Command::new("tmux")
         .args(["delete-buffer", "-b", buffer])
         .output()
         .map_err(|e| CcxError::Other(anyhow::anyhow!("tmux delete-buffer failed: {e}")))?;
+    if !output.status.success() {
+        return Err(CcxError::Other(anyhow::anyhow!(
+            "tmux delete-buffer failed (exit {}): {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
     Ok(())
 }
 

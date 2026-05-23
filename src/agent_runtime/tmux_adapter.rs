@@ -10,7 +10,7 @@ pub fn session_name(session_id: &str) -> String {
 
 /// Returns an exact-match target string (tmux 3.1+ `=` prefix) to prevent
 /// unintended prefix resolution when multiple sessions share a common prefix.
-fn session_target(session_id: &str) -> String {
+pub fn session_target(session_id: &str) -> String {
     format!("=ccx-{session_id}")
 }
 
