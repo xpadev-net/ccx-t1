@@ -27,6 +27,31 @@ enum Command {
         #[command(subcommand)]
         cmd: cli::DbCommand,
     },
+    /// Work execution management
+    Work {
+        #[command(subcommand)]
+        cmd: cli::WorkCommand,
+    },
+    /// Agent session management
+    Agent {
+        #[command(subcommand)]
+        cmd: cli::AgentCommand,
+    },
+    /// Write lease management
+    Lease {
+        #[command(subcommand)]
+        cmd: cli::LeaseCommand,
+    },
+    /// PR merge operations
+    Merge {
+        #[command(subcommand)]
+        cmd: cli::MergeCommand,
+    },
+    /// Recovery and diagnostics
+    Recovery {
+        #[command(subcommand)]
+        cmd: cli::RecoveryCommand,
+    },
 }
 
 fn main() {
@@ -41,6 +66,11 @@ fn main() {
     let result = match cli.command {
         Command::Project { cmd } => cli::run_project(cmd),
         Command::Db { cmd } => cli::run_db(cmd),
+        Command::Work { cmd } => cli::run_work(cmd),
+        Command::Agent { cmd } => cli::run_agent(cmd),
+        Command::Lease { cmd } => cli::run_lease(cmd),
+        Command::Merge { cmd } => cli::run_merge(cmd),
+        Command::Recovery { cmd } => cli::run_recovery(cmd),
     };
 
     if let Err(e) = result {

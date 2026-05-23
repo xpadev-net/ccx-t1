@@ -135,6 +135,34 @@ pub struct StatusArgs {
     pub json: bool,
 }
 
+#[derive(Debug, Args)]
+pub struct OpenArgs {
+    pub project_id: String,
+    #[arg(long)]
+    pub json: bool,
+}
+
+pub fn open(args: OpenArgs) -> Result<(), CcxError> {
+    let dir = project_dir(&args.project_id)?;
+    let config_path = dir.join("project.json");
+    let raw = match fs::read_to_string(&config_path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == ErrorKind::NotFound => {
+            return Err(CcxError::ProjectNotFound { project_id: args.project_id })
+        }
+        Err(e) => return Err(e.into()),
+    };
+    let config: ProjectConfig = serde_json::from_str(&raw)?;
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&config)?);
+    } else {
+        println!("Opening project: {} ({})", config.project_id, config.display_slug);
+        println!("canonical_repo: {}", config.canonical_repo);
+        println!("(ccx-cmux integration not yet implemented)");
+    }
+    Ok(())
+}
+
 pub fn status(args: StatusArgs) -> Result<(), CcxError> {
     let dir = project_dir(&args.project_id)?;
     let config_path = dir.join("project.json");
