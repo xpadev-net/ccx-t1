@@ -136,12 +136,13 @@ fn elapsed_hours(selected_at: &str) -> Result<f64, CcxError> {
 pub fn evaluate(config: &CircuitBreakerConfig, dir: &Utf8Path) -> Result<CircuitBreakerResult, CcxError> {
     let conn = open_db(dir)?;
     let selected_at = query_selected_at(&conn, &config.work_execution_id)?;
-    let elapsed = elapsed_hours(&selected_at)?;
 
     // All threshold evaluation and the conditional Hold write happen inside
-    // locked_read_write so the retry count, threshold check, and event append
-    // are serialized against concurrent invocations.  Results are communicated
-    // back to the caller via mutable captures (safe: FnOnce, single-threaded).
+    // locked_read_write so the retry count, elapsed time, threshold check,
+    // and event append are all serialized against concurrent invocations.
+    // Results are communicated back to the caller via mutable captures
+    // (safe: FnOnce, single-threaded).
+    let mut result_elapsed: f64 = 0.0;
     let mut result_retry_count: u32 = 0;
     let mut result_threshold_met = false;
     let mut result_reason: Option<String> = None;
@@ -156,6 +157,11 @@ pub fn evaluate(config: &CircuitBreakerConfig, dir: &Utf8Path) -> Result<Circuit
         let retry_count =
             count_failures_since_last_resume(latest_events, &work_execution_id);
         result_retry_count = retry_count;
+
+        // Re-compute elapsed under lock so both threshold checks share the
+        // same wall-clock snapshot, avoiding a stale pre-lock elapsed value.
+        let elapsed = elapsed_hours(&selected_at)?;
+        result_elapsed = elapsed;
 
         let (threshold_met, reason) = if retry_count >= max_retries {
             (
@@ -208,7 +214,7 @@ pub fn evaluate(config: &CircuitBreakerConfig, dir: &Utf8Path) -> Result<Circuit
         threshold_met: result_threshold_met,
         reason: result_reason,
         retry_count: result_retry_count,
-        elapsed_hours: elapsed,
+        elapsed_hours: result_elapsed,
     })
 }
 
@@ -290,8 +296,8 @@ mod tests {
 
     #[test]
     fn elapsed_hours_returns_positive_for_past_timestamp() {
-        let an_hour_ago = (Utc::now() - chrono::Duration::hours(2)).to_rfc3339();
-        let h = elapsed_hours(&an_hour_ago).unwrap();
+        let two_hours_ago = (Utc::now() - chrono::Duration::hours(2)).to_rfc3339();
+        let h = elapsed_hours(&two_hours_ago).unwrap();
         assert!(h >= 1.9 && h <= 2.1, "expected ~2h, got {h}");
     }
 }
