@@ -224,7 +224,7 @@ pub fn make_adapter_from(socket_path: &str) -> Box<dyn CmuxAdapter> {
     if is_socket {
         Box::new(SocketCmuxAdapter::new(socket_path))
     } else {
-        warn!("cmux socket not found at {socket_path}, running headless");
+        warn!("cmux socket unavailable at {socket_path} (missing or not a socket), running headless");
         Box::new(HeadlessCmuxAdapter)
     }
 }
@@ -299,6 +299,12 @@ mod tests {
     }
 
     // --- SocketCmuxAdapter tests ---
+    //
+    // Note: mock response "id" values are intentionally arbitrary strings.
+    // send_rpc now uses an AtomicU64 counter for request IDs but does NOT
+    // validate that the response ID echoes the request, so any id value in
+    // the mock reply is accepted. If response-ID validation is ever added,
+    // these fixtures will need updating to match the counter sequence.
 
     #[test]
     fn socket_adapter_sends_workspace_create() {
