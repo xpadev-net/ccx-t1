@@ -21,7 +21,11 @@ pub struct CircuitBreakerConfig {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CircuitBreakerResult {
     pub work_execution_id: String,
+    /// `true` when a Hold event was actually written this invocation.
+    /// `false` if the threshold was not met, or if the WE was already in Hold.
     pub triggered: bool,
+    /// `true` when the retry or time threshold was met (regardless of prior Hold).
+    pub threshold_met: bool,
     pub reason: Option<String>,
     pub retry_count: u32,
     pub elapsed_hours: f64,
@@ -123,7 +127,7 @@ pub fn evaluate(config: &CircuitBreakerConfig, dir: &Utf8Path) -> Result<Circuit
     let selected_at = query_selected_at(&conn, &config.work_execution_id)?;
     let elapsed = elapsed_hours(&selected_at)?;
 
-    let (triggered, reason) = if retry_count >= config.max_retries {
+    let (threshold_met, reason) = if retry_count >= config.max_retries {
         (
             true,
             Some(format!(
@@ -143,10 +147,10 @@ pub fn evaluate(config: &CircuitBreakerConfig, dir: &Utf8Path) -> Result<Circuit
         (false, None)
     };
 
-    if triggered {
-        // Perform the check-then-write under the events.lock to prevent a TOCTOU
-        // race where two concurrent `circuit-check` invocations both observe the
-        // pre-Hold state and both append a Hold event.
+    // `triggered` is true only when a Hold event was actually written this call.
+    // If the WE is already in Hold (prior invocation), locked_read_write returns
+    // false — making repeated invocations distinguishable in the JSON output.
+    let triggered = if threshold_met {
         let project_id = config.project_id.clone();
         let work_execution_id = config.work_execution_id.clone();
         locked_read_write(dir, |latest_events| {
@@ -169,12 +173,15 @@ pub fn evaluate(config: &CircuitBreakerConfig, dir: &Utf8Path) -> Result<Circuit
                     to: WorkExecutionState::Hold,
                 }),
             )))
-        })?;
-    }
+        })?
+    } else {
+        false
+    };
 
     Ok(CircuitBreakerResult {
         work_execution_id: config.work_execution_id.clone(),
         triggered,
+        threshold_met,
         reason,
         retry_count,
         elapsed_hours: elapsed,

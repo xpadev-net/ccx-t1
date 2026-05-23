@@ -58,8 +58,11 @@ pub fn append_event_to_dir(dir: &Utf8Path, event: &Event) -> Result<(), CcxError
 /// the lock. This guarantees that the check and the write are serialized with
 /// respect to all other callers that go through `append_event_to_dir`.
 ///
+/// Returns `true` if an event was actually appended, `false` if the closure
+/// returned `None` (no-op / already-handled case).
+///
 /// The SQLite projection runs after the lock is released (best-effort, as usual).
-pub fn locked_read_write<F>(dir: &Utf8Path, f: F) -> Result<(), CcxError>
+pub fn locked_read_write<F>(dir: &Utf8Path, f: F) -> Result<bool, CcxError>
 where
     F: FnOnce(&[Event]) -> Result<Option<Event>, CcxError>,
 {
@@ -93,13 +96,15 @@ where
         log_file.sync_all()?;
     }
 
+    let written = maybe_event.is_some();
+
     // Release the write lock before the SQLite projection.
     drop(_guard);
 
     if let Some(event) = maybe_event {
         crate::persistence::projector::try_project_event(dir, &event);
     }
-    Ok(())
+    Ok(written)
 }
 
 /// Append a single `Event` to the project's canonical `events.jsonl`.
