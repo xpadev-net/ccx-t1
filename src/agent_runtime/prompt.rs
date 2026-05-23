@@ -56,8 +56,13 @@ pub fn send_to_tmux(session_id: &str, text: &str) -> Result<(), CcxError> {
     let output = load
         .wait_with_output()
         .map_err(|e| CcxError::Other(anyhow::anyhow!("tmux load-buffer wait failed: {e}")))?;
-    write_result?;
+    if let Err(e) = write_result {
+        // Buffer may have been partially loaded; clean it up before returning.
+        let _ = delete_buffer(&buffer);
+        return Err(e);
+    }
     if !output.status.success() {
+        let _ = delete_buffer(&buffer);
         return Err(CcxError::Other(anyhow::anyhow!(
             "tmux load-buffer failed (exit {}): {}",
             output.status,

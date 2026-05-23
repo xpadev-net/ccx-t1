@@ -86,6 +86,8 @@ pub enum AgentCommand {
     Stop(agent::StopArgs),
     /// Send a user notification for an agent session
     Notify(agent::NotifyArgs),
+    /// Record an AgentLifecycleStop event (called by the agent harness on exit)
+    LifecycleStop(agent::LifecycleStopArgs),
 }
 
 pub fn run_agent(cmd: AgentCommand) -> Result<(), crate::error::CcxError> {
@@ -95,6 +97,7 @@ pub fn run_agent(cmd: AgentCommand) -> Result<(), crate::error::CcxError> {
         AgentCommand::Prompt(args) => agent::prompt(args),
         AgentCommand::Stop(args) => agent::stop(args),
         AgentCommand::Notify(args) => agent::notify(args),
+        AgentCommand::LifecycleStop(args) => agent::lifecycle_stop(args),
     }
 }
 
