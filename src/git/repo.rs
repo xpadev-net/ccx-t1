@@ -48,6 +48,26 @@ pub fn check_dirty(repo: &Utf8Path) -> Result<Vec<DirtyEntry>, CcxError> {
     Ok(parse_porcelain(&stdout))
 }
 
+/// Run `git reset --hard HEAD` in `repo`, discarding all uncommitted changes to
+/// tracked files. Untracked files are left in place; call `git clean -fd`
+/// separately if you also need to remove them.
+pub fn reset_hard(repo: &Utf8Path) -> Result<(), CcxError> {
+    let output = std::process::Command::new("git")
+        .args(["reset", "--hard", "HEAD"])
+        .current_dir(repo)
+        .output()
+        .map_err(|e| CcxError::Git(format!("failed to run git reset: {e}")))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(CcxError::Git(format!(
+            "git reset --hard HEAD exited with {:?}: {stderr}",
+            output.status.code()
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -128,5 +148,35 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].xy, "D ");
         assert_eq!(entries[0].path, "removed.rs");
+    }
+
+    // ── Level 2: local git tests ──────────────────────────────────────────────
+
+    #[test]
+    fn check_dirty_clean_repo_returns_empty() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = crate::git::test_helpers::init_repo(&tmp);
+        let entries = check_dirty(&dir).unwrap();
+        assert!(entries.is_empty(), "clean repo should have no dirty entries");
+    }
+
+    #[test]
+    fn check_dirty_detects_modified_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = crate::git::test_helpers::init_repo(&tmp);
+        std::fs::write(dir.join("README"), b"modified").unwrap();
+        let entries = check_dirty(&dir).unwrap();
+        assert!(!entries.is_empty(), "modified file should appear as dirty");
+        assert!(entries.iter().any(|e| e.path == "README"));
+    }
+
+    #[test]
+    fn reset_hard_clears_modifications() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = crate::git::test_helpers::init_repo(&tmp);
+        std::fs::write(dir.join("README"), b"dirty").unwrap();
+        assert!(!check_dirty(&dir).unwrap().is_empty());
+        reset_hard(&dir).unwrap();
+        assert!(check_dirty(&dir).unwrap().is_empty(), "dirty entries should be gone after reset");
     }
 }

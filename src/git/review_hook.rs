@@ -65,4 +65,64 @@ mod tests {
             ReviewHookOutcome::Failure { exit_code: -1, stderr: "signal".into() }
         );
     }
+
+    // ── Level 3: fake external command tests ─────────────────────────────────
+
+    // Tests that manipulate PATH must not run concurrently.
+    static PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn write_fake_hook(dir: &std::path::Path, exit_code: u8) {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join("gh-review-hook");
+        std::fs::write(&path, format!("#!/bin/sh\nexit {exit_code}\n")).unwrap();
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&path, perms).unwrap();
+    }
+
+    struct PathGuard(String);
+    impl Drop for PathGuard {
+        fn drop(&mut self) {
+            unsafe { std::env::set_var("PATH", &self.0) };
+        }
+    }
+
+    fn with_fake_path<F: FnOnce()>(bin_dir: &std::path::Path, f: F) {
+        let _guard = PATH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let original = std::env::var("PATH").unwrap_or_default();
+        let new_path = format!("{}:{}", bin_dir.display(), original);
+        let _restore = PathGuard(original);
+        unsafe { std::env::set_var("PATH", &new_path) };
+        f();
+    }
+
+    #[test]
+    fn run_review_hook_exit_0_is_pass() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_fake_hook(tmp.path(), 0);
+        with_fake_path(tmp.path(), || {
+            let result = run_review_hook(tmp.path()).unwrap();
+            assert_eq!(result, ReviewHookOutcome::Pass);
+        });
+    }
+
+    #[test]
+    fn run_review_hook_exit_2_is_issues() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_fake_hook(tmp.path(), 2);
+        with_fake_path(tmp.path(), || {
+            let result = run_review_hook(tmp.path()).unwrap();
+            assert!(matches!(result, ReviewHookOutcome::Issues { .. }));
+        });
+    }
+
+    #[test]
+    fn run_review_hook_exit_1_is_failure() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_fake_hook(tmp.path(), 1);
+        with_fake_path(tmp.path(), || {
+            let result = run_review_hook(tmp.path()).unwrap();
+            assert!(matches!(result, ReviewHookOutcome::Failure { exit_code: 1, .. }));
+        });
+    }
 }

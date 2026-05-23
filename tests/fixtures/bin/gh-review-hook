@@ -1,0 +1,11 @@
+#!/bin/sh
+# Fake gh-review-hook binary for tests.
+# Behavior is controlled via environment variables:
+#   FAKE_GH_REVIEW_HOOK_EXIT — exit code (default: 0)
+#   FAKE_GH_REVIEW_HOOK_MSG  — message to emit on stderr when exit != 0
+
+exit_code="${FAKE_GH_REVIEW_HOOK_EXIT:-0}"
+if [ "$exit_code" != "0" ]; then
+  echo "${FAKE_GH_REVIEW_HOOK_MSG:-review issues found}" >&2
+fi
+exit "$exit_code"
