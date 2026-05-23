@@ -93,10 +93,13 @@ impl SocketCmuxAdapter {
 
     fn send_rpc(
         &self,
-        id: &str,
         method: &str,
         params: serde_json::Value,
     ) -> Result<serde_json::Value, CcxError> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static RPC_COUNTER: AtomicU64 = AtomicU64::new(1);
+        let id = RPC_COUNTER.fetch_add(1, Ordering::Relaxed).to_string();
+
         let request = serde_json::json!({
             "jsonrpc": "2.0",
             "id": id,
@@ -135,14 +138,14 @@ impl SocketCmuxAdapter {
 impl CmuxAdapter for SocketCmuxAdapter {
     fn ensure_workspace(
         &self,
-        _project_id: &str,
+        project_id: &str,
         display_slug: &str,
         canonical_repo: &str,
     ) -> Result<String, CcxError> {
         let result = self.send_rpc(
-            "ws-create-1",
             "workspace.create",
             serde_json::json!({
+                "project_id": project_id,
                 "name": format!("CCX: {display_slug}"),
                 "cwd": canonical_repo,
             }),
@@ -158,7 +161,6 @@ impl CmuxAdapter for SocketCmuxAdapter {
     fn create_agent_tab(&self, spec: &AgentSessionSpec) -> Result<String, CcxError> {
         let cwd = spec.worktree_path.as_ref().unwrap_or(&spec.cwd_path);
         let result = self.send_rpc(
-            "tab-create-1",
             "surface.create",
             serde_json::json!({
                 "workspace_id": spec.cmux_workspace_id,
@@ -178,7 +180,6 @@ impl CmuxAdapter for SocketCmuxAdapter {
 
     fn close_tab(&self, tab_id: &str) -> Result<(), CcxError> {
         self.send_rpc(
-            "tab-close-1",
             "surface.close",
             serde_json::json!({ "surface_id": tab_id }),
         )?;
@@ -187,7 +188,6 @@ impl CmuxAdapter for SocketCmuxAdapter {
 
     fn notify_user(&self, tab_id: &str, message: &str, level: &str) -> Result<(), CcxError> {
         self.send_rpc(
-            "notify-1",
             "ui.notify",
             serde_json::json!({
                 "surface_id": tab_id,
@@ -204,12 +204,15 @@ impl CmuxAdapter for SocketCmuxAdapter {
 // ---------------------------------------------------------------------------
 
 pub fn make_adapter() -> Box<dyn CmuxAdapter> {
-    match UnixStream::connect(SOCKET_PATH) {
-        Ok(_) => Box::new(SocketCmuxAdapter::new(SOCKET_PATH)),
-        Err(e) => {
-            warn!("cmux socket unavailable at {SOCKET_PATH} ({e}), running headless");
-            Box::new(HeadlessCmuxAdapter)
-        }
+    make_adapter_from(SOCKET_PATH)
+}
+
+pub fn make_adapter_from(socket_path: &str) -> Box<dyn CmuxAdapter> {
+    if std::fs::metadata(socket_path).is_ok() {
+        Box::new(SocketCmuxAdapter::new(socket_path))
+    } else {
+        warn!("cmux socket not found at {socket_path}, running headless");
+        Box::new(HeadlessCmuxAdapter)
     }
 }
 
@@ -305,6 +308,7 @@ mod tests {
 
         let request = server.join().unwrap();
         assert_eq!(request["method"], "workspace.create");
+        assert_eq!(request["params"]["project_id"], "proj-1");
         assert_eq!(request["params"]["name"], "CCX: my-slug");
         assert_eq!(request["params"]["cwd"], "/repos/myproject");
         assert_eq!(request["jsonrpc"], "2.0");
@@ -394,16 +398,35 @@ mod tests {
     }
 
     #[test]
-    fn make_adapter_returns_headless_when_socket_absent() {
-        let absent_path = "/tmp/ccx-nonexistent-cmux-test.sock";
-        let _ = std::fs::remove_file(absent_path);
-        // Temporarily swap the constant can't be done at runtime; instead verify
-        // HeadlessCmuxAdapter directly by calling make_adapter and checking the
-        // returned type via a known sentinel return value.
-        // We can only test make_adapter indirectly: call it (which will hit real
-        // /tmp/cmux.sock or fall back), so here we just verify HeadlessCmuxAdapter
-        // is well-formed and make_adapter returns *something* without panicking.
-        let _adapter = make_adapter();
+    fn make_adapter_from_returns_headless_when_socket_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let absent = dir.path().join("absent.sock").to_string_lossy().into_owned();
+        // Socket file does not exist — must fall back to headless
+        let adapter = make_adapter_from(&absent);
+        let ws_id = adapter.ensure_workspace("proj-x", "slug", "/repo").unwrap();
+        assert!(
+            ws_id.starts_with("headless-"),
+            "expected headless sentinel, got: {ws_id}"
+        );
+    }
+
+    #[test]
+    fn make_adapter_from_returns_socket_when_file_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = sock_path(&dir);
+        // Create the socket file so metadata check succeeds
+        let _listener = UnixListener::bind(&path).unwrap();
+        let adapter = make_adapter_from(&path);
+        // Confirm it's a SocketCmuxAdapter by checking that calling it connects
+        // (it will fail since nobody is responding, but the error is a connect/IO error
+        // rather than a headless sentinel)
+        let result = adapter.ensure_workspace("proj-x", "slug", "/repo");
+        // The listener is not responding so we'll get an error — that's expected;
+        // what matters is the adapter tried to connect (not returning a headless ID).
+        assert!(
+            result.is_err() || !result.as_ref().unwrap().starts_with("headless-"),
+            "socket adapter should not return a headless sentinel"
+        );
     }
 
     #[test]
