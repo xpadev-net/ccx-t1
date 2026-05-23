@@ -99,33 +99,10 @@ pub fn remove_worktree(repo: &Utf8Path, worktree_path: &Utf8Path) -> Result<(), 
 mod tests {
     use super::*;
 
-    fn init_repo(dir: &camino::Utf8Path) {
-        for cmd in [
-            vec!["init"],
-            vec!["config", "user.email", "test@test.com"],
-            vec!["config", "user.name", "Test"],
-        ] {
-            std::process::Command::new("git")
-                .args(&cmd)
-                .current_dir(dir)
-                .output()
-                .unwrap();
-        }
-        std::fs::write(dir.join("README"), b"init").unwrap();
-        for cmd in [vec!["add", "."], vec!["commit", "-m", "init"]] {
-            std::process::Command::new("git")
-                .args(&cmd)
-                .current_dir(dir)
-                .output()
-                .unwrap();
-        }
-    }
-
     #[test]
     fn create_worktree_creates_branch_and_symlink() {
         let tmp_repo = tempfile::tempdir().unwrap();
-        let repo = camino::Utf8PathBuf::try_from(tmp_repo.path().to_path_buf()).unwrap();
-        init_repo(&repo);
+        let repo = crate::git::test_helpers::init_repo(&tmp_repo);
 
         let tmp_wt = tempfile::tempdir().unwrap();
         let wt_path = camino::Utf8PathBuf::try_from(tmp_wt.path().join("wt")).unwrap();
@@ -155,8 +132,7 @@ mod tests {
     #[test]
     fn remove_worktree_removes_directory() {
         let tmp_repo = tempfile::tempdir().unwrap();
-        let repo = camino::Utf8PathBuf::try_from(tmp_repo.path().to_path_buf()).unwrap();
-        init_repo(&repo);
+        let repo = crate::git::test_helpers::init_repo(&tmp_repo);
 
         let tmp_wt = tempfile::tempdir().unwrap();
         let wt_path = camino::Utf8PathBuf::try_from(tmp_wt.path().join("wt")).unwrap();
