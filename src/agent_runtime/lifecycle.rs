@@ -59,7 +59,7 @@ pub fn handle_lifecycle_stop(config: &LifecycleStopConfig) -> Result<(), CcxErro
 
 /// Returns `"ready"` if the file exists and has at least one byte; `"invalid"` otherwise.
 /// Unexpected I/O errors (EACCES, ELOOP, etc.) are logged and treated as `"invalid"`.
-fn validate_task_file(path: &PathBuf) -> &'static str {
+fn validate_task_file(path: &std::path::Path) -> &'static str {
     match std::fs::metadata(path) {
         Ok(meta) if meta.len() > 0 => "ready",
         Ok(_) => "invalid",

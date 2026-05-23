@@ -97,10 +97,17 @@ pub fn send_to_tmux(session_id: &str, text: &str) -> Result<(), CcxError> {
 }
 
 fn delete_buffer(buffer: &str) -> Result<(), CcxError> {
-    Command::new("tmux")
+    let output = Command::new("tmux")
         .args(["delete-buffer", "-b", buffer])
         .output()
         .map_err(|e| CcxError::Other(anyhow::anyhow!("tmux delete-buffer failed: {e}")))?;
+    if !output.status.success() {
+        return Err(CcxError::Other(anyhow::anyhow!(
+            "tmux delete-buffer failed (exit {}): {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
     Ok(())
 }
 

@@ -132,11 +132,11 @@ pub fn stop(args: StopArgs) -> Result<(), CcxError> {
     let dir = project_dir(&args.project_id)?;
     let conn = open_db(&dir)?;
 
-    let (project_id, cmux_tab_id): (String, String) = conn
+    let cmux_tab_id: String = conn
         .query_row(
-            "SELECT project_id, cmux_tab_id FROM agent_sessions WHERE agent_session_id = ?1",
+            "SELECT cmux_tab_id FROM agent_sessions WHERE agent_session_id = ?1",
             rusqlite::params![args.session_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )
         .map_err(|e| {
             CcxError::Other(anyhow::anyhow!(
@@ -148,7 +148,7 @@ pub fn stop(args: StopArgs) -> Result<(), CcxError> {
     // Write the event first so the record is durable before any destructive action.
     // If the event write fails, nothing has been destroyed and the caller can retry.
     let event = Event::new(
-        &project_id,
+        &args.project_id,
         Actor::Controller,
         EventData::AgentSessionStopped(AgentSessionStoppedPayload {
             agent_session_id: args.session_id.clone(),
@@ -158,9 +158,12 @@ pub fn stop(args: StopArgs) -> Result<(), CcxError> {
     append_event_to_dir(&dir, &event)?;
 
     let tmux = ShellTmuxAdapter;
-    tmux.kill_session(&args.session_id)?;
+    let kill_result = tmux.kill_session(&args.session_id);
+    // close_tab is best-effort and runs unconditionally so the tab is cleaned up
+    // even when kill_session returns an unexpected error.
     let cmux = make_adapter();
     let _ = cmux.close_tab(&cmux_tab_id);
+    kill_result?;
 
     if args.json {
         println!(
