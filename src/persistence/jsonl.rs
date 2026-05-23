@@ -247,4 +247,46 @@ mod tests {
         let events = read_events_from_dir(&dir).unwrap();
         assert_eq!(events.len(), 20);
     }
+
+    #[test]
+    fn locked_read_write_appends_event_and_returns_true() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = camino::Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
+        let id = crate::domain::event::generate_id().to_string();
+
+        let event = make_registered_event(&id, "test-slug");
+        let written = locked_read_write(&dir, |_events| Ok(Some(event.clone()))).unwrap();
+        assert!(written);
+
+        let stored = read_events_from_dir(&dir).unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].event_id, event.event_id);
+    }
+
+    #[test]
+    fn locked_read_write_skips_when_none_returned() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = camino::Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
+
+        let written = locked_read_write(&dir, |_events| Ok(None)).unwrap();
+        assert!(!written);
+        assert!(read_events_from_dir(&dir).unwrap().is_empty());
+    }
+
+    #[test]
+    fn locked_read_write_closure_sees_prior_events() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = camino::Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
+        let id = crate::domain::event::generate_id().to_string();
+
+        append_event_to_dir(&dir, &make_registered_event(&id, "first")).unwrap();
+
+        let mut seen_count = 0usize;
+        locked_read_write(&dir, |events| {
+            seen_count = events.len();
+            Ok(None)
+        })
+        .unwrap();
+        assert_eq!(seen_count, 1);
+    }
 }

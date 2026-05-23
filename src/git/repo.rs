@@ -48,6 +48,23 @@ pub fn check_dirty(repo: &Utf8Path) -> Result<Vec<DirtyEntry>, CcxError> {
     Ok(parse_porcelain(&stdout))
 }
 
+/// Run `git reset --hard HEAD` in `repo`, discarding all uncommitted changes.
+pub fn reset_hard(repo: &Utf8Path) -> Result<(), CcxError> {
+    let status = std::process::Command::new("git")
+        .args(["reset", "--hard", "HEAD"])
+        .current_dir(repo)
+        .status()
+        .map_err(|e| CcxError::Git(format!("failed to run git reset: {e}")))?;
+
+    if !status.success() {
+        return Err(CcxError::Git(format!(
+            "git reset --hard HEAD exited with {:?}",
+            status.code()
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -128,5 +145,60 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].xy, "D ");
         assert_eq!(entries[0].path, "removed.rs");
+    }
+
+    // ── Level 2: local git tests ──────────────────────────────────────────────
+
+    fn init_repo(tmp: &tempfile::TempDir) -> camino::Utf8PathBuf {
+        let dir = camino::Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
+        for cmd in [
+            vec!["init"],
+            vec!["config", "user.email", "test@test.com"],
+            vec!["config", "user.name", "Test"],
+        ] {
+            std::process::Command::new("git")
+                .args(&cmd)
+                .current_dir(&dir)
+                .output()
+                .unwrap();
+        }
+        // Initial commit required for branches to resolve HEAD.
+        std::fs::write(dir.join("README"), b"init").unwrap();
+        for cmd in [vec!["add", "."], vec!["commit", "-m", "init"]] {
+            std::process::Command::new("git")
+                .args(&cmd)
+                .current_dir(&dir)
+                .output()
+                .unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn check_dirty_clean_repo_returns_empty() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = init_repo(&tmp);
+        let entries = check_dirty(&dir).unwrap();
+        assert!(entries.is_empty(), "clean repo should have no dirty entries");
+    }
+
+    #[test]
+    fn check_dirty_detects_modified_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = init_repo(&tmp);
+        std::fs::write(dir.join("README"), b"modified").unwrap();
+        let entries = check_dirty(&dir).unwrap();
+        assert!(!entries.is_empty(), "modified file should appear as dirty");
+        assert!(entries.iter().any(|e| e.path == "README"));
+    }
+
+    #[test]
+    fn reset_hard_clears_modifications() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = init_repo(&tmp);
+        std::fs::write(dir.join("README"), b"dirty").unwrap();
+        assert!(!check_dirty(&dir).unwrap().is_empty());
+        reset_hard(&dir).unwrap();
+        assert!(check_dirty(&dir).unwrap().is_empty(), "dirty entries should be gone after reset");
     }
 }
