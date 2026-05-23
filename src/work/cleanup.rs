@@ -39,10 +39,11 @@ struct WeRow {
     selected_at: String,
 }
 
-fn query_we(conn: &Connection, work_execution_id: &str) -> Result<WeRow, CcxError> {
+fn query_we(conn: &Connection, project_id: &str, work_execution_id: &str) -> Result<WeRow, CcxError> {
     conn.query_row(
-        "SELECT worktree_path, selected_at FROM work_executions WHERE work_execution_id = ?1",
-        rusqlite::params![work_execution_id],
+        "SELECT worktree_path, selected_at FROM work_executions
+         WHERE work_execution_id = ?1 AND project_id = ?2",
+        rusqlite::params![work_execution_id, project_id],
         |row| Ok(WeRow { worktree_path: row.get(0)?, selected_at: row.get(1)? }),
     )
     .map_err(|e| {
@@ -88,7 +89,8 @@ fn should_remove_worktree(
 
         CleanupPolicy::KeepLastN => {
             // Preserve the most recent `keep_last_n` WEs; remove everything else.
-            let ids: Vec<String> = conn
+            // On DB error, preserve (return false) to avoid accidental deletion.
+            let ids: Vec<String> = match conn
                 .prepare(
                     "SELECT work_execution_id FROM work_executions
                      WHERE project_id = ?1
@@ -98,8 +100,10 @@ fn should_remove_worktree(
                 .and_then(|mut s| {
                     s.query_map(rusqlite::params![project_id, keep_last_n], |row| row.get(0))
                         .and_then(|rows| rows.collect::<Result<Vec<_>, _>>())
-                })
-                .unwrap_or_default();
+                }) {
+                Ok(v) => v,
+                Err(_) => return false,
+            };
             !ids.iter().any(|id| id == work_execution_id)
         }
 
@@ -118,7 +122,7 @@ fn should_remove_worktree(
 pub fn run_cleanup(config: &CleanupConfig) -> Result<CleanupResult, CcxError> {
     let conn = open_db(&config.project_dir)?;
 
-    let we = query_we(&conn, &config.work_execution_id)?;
+    let we = query_we(&conn, &config.project_id, &config.work_execution_id)?;
     let sessions = query_sessions(&conn, &config.work_execution_id)?;
 
     // Emit CleanupStarted before taking any destructive action.
@@ -137,9 +141,11 @@ pub fn run_cleanup(config: &CleanupConfig) -> Result<CleanupResult, CcxError> {
     let mut closed_sessions = Vec::new();
 
     for s in &sessions {
-        let _ = tmux.kill_session(&s.tmux_session_id);
-        let _ = cmux.close_tab(&s.cmux_tab_id);
-        closed_sessions.push(s.agent_session_id.clone());
+        let tmux_ok = tmux.kill_session(&s.tmux_session_id).is_ok();
+        let cmux_ok = cmux.close_tab(&s.cmux_tab_id).is_ok();
+        if tmux_ok || cmux_ok {
+            closed_sessions.push(s.agent_session_id.clone());
+        }
     }
 
     // Decide whether to remove the worktree based on cleanup policy.
