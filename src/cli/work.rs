@@ -1,7 +1,9 @@
 use clap::Args;
 
+use crate::config::project_dir;
 use crate::domain::event::generate_id;
 use crate::error::CcxError;
+use crate::git::github::{execute_merge, MergeConfig};
 
 // ---------------------------------------------------------------------------
 // work create
@@ -87,29 +89,42 @@ pub fn cleanup(args: CleanupArgs) -> Result<(), CcxError> {
 #[derive(Debug, Args)]
 pub struct MergeExecuteArgs {
     #[arg(long)]
+    pub project_id: String,
+    #[arg(long)]
     pub work_execution_id: String,
     #[arg(long)]
-    pub owner_agent_session_id: Option<String>,
+    pub owner_agent_session_id: String,
     #[arg(long)]
     pub json: bool,
 }
 
 pub fn merge_execute(args: MergeExecuteArgs) -> Result<(), CcxError> {
+    let dir = project_dir(&args.project_id)?;
+
+    let config = MergeConfig {
+        project_id: args.project_id.clone(),
+        project_dir: dir,
+        work_execution_id: args.work_execution_id.clone(),
+        owner_agent_session_id: args.owner_agent_session_id.clone(),
+    };
+
+    let outcome = execute_merge(&config)?;
+
     if args.json {
         println!(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({
                 "work_execution_id": args.work_execution_id,
                 "status": "merged",
-                "sync_status": "success",
-                "sync_warning": null,
+                "sync_status": outcome.sync_status,
+                "sync_warning": outcome.sync_warning,
             }))?
         );
     } else {
-        println!(
-            "merge execute {} (skeleton — not yet implemented)",
-            args.work_execution_id
-        );
+        println!("merged PR #{}", outcome.pr_number);
+        if let Some(w) = &outcome.sync_warning {
+            println!("sync warning: {w}");
+        }
     }
     Ok(())
 }
