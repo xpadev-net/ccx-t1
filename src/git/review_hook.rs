@@ -80,13 +80,20 @@ mod tests {
         std::fs::set_permissions(&path, perms).unwrap();
     }
 
+    struct PathGuard(String);
+    impl Drop for PathGuard {
+        fn drop(&mut self) {
+            unsafe { std::env::set_var("PATH", &self.0) };
+        }
+    }
+
     fn with_fake_path<F: FnOnce()>(bin_dir: &std::path::Path, f: F) {
-        let _guard = PATH_LOCK.lock().unwrap();
+        let _guard = PATH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let original = std::env::var("PATH").unwrap_or_default();
         let new_path = format!("{}:{}", bin_dir.display(), original);
+        let _restore = PathGuard(original);
         unsafe { std::env::set_var("PATH", &new_path) };
         f();
-        unsafe { std::env::set_var("PATH", &original) };
     }
 
     #[test]

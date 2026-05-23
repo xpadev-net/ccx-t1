@@ -61,6 +61,10 @@ pub fn create_worktree(
 }
 
 /// Remove a git worktree and prune stale administrative files.
+///
+/// Passes `--force` to `git worktree remove`, which discards any uncommitted
+/// changes in the worktree without error. Callers must ensure that any work
+/// they want to preserve has been committed or stashed beforehand.
 pub fn remove_worktree(repo: &Utf8Path, worktree_path: &Utf8Path) -> Result<(), CcxError> {
     let status = std::process::Command::new("git")
         .args(["worktree", "remove", "--force", worktree_path.as_str()])

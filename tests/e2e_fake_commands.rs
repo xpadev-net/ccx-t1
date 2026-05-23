@@ -38,6 +38,7 @@ fn project_register_and_list_roundtrip() {
     let repo = tmp.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
     let tasks = repo.join("tasks.md");
+    std::fs::write(&tasks, b"").unwrap();
 
     let (code, stdout, _stderr) = run_ccx(
         &[
