@@ -45,9 +45,16 @@ fn run_heartbeat_loop(
         if shutdown.load(Ordering::Acquire) {
             // Emit a stopped event if the session already died before shutdown fired.
             // If the session is still alive the caller owns teardown and must emit the event.
-            let still_alive = tmux
-                .session_exists(&config.agent_session_id)
-                .unwrap_or(true);
+            let still_alive = match tmux.session_exists(&config.agent_session_id) {
+                Ok(v) => v,
+                Err(e) => {
+                    warn!(
+                        "session_exists error on shutdown for {}: {e}",
+                        config.agent_session_id
+                    );
+                    true // conservative: assume alive, caller owns teardown
+                }
+            };
             if !still_alive {
                 let event = Event::new(
                     &config.project_id,

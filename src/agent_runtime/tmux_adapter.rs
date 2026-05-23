@@ -8,6 +8,12 @@ pub fn session_name(session_id: &str) -> String {
     format!("ccx-{session_id}")
 }
 
+/// Returns an exact-match target string (tmux 3.1+ `=` prefix) to prevent
+/// unintended prefix resolution when multiple sessions share a common prefix.
+fn session_target(session_id: &str) -> String {
+    format!("=ccx-{session_id}")
+}
+
 /// Validate env-var key/value pairs for tmux compatibility.
 ///
 /// Keys must be non-empty and must not contain `=` (tmux splits on the first `=`
@@ -99,9 +105,9 @@ impl TmuxAdapter for ShellTmuxAdapter {
     }
 
     fn kill_session(&self, session_id: &str) -> Result<(), CcxError> {
-        let name = session_name(session_id);
+        let target = session_target(session_id);
         let output = Command::new("tmux")
-            .args(["kill-session", "-t", &name])
+            .args(["kill-session", "-t", &target])
             .output()?;
         if output.status.success() {
             return Ok(());
@@ -118,17 +124,17 @@ impl TmuxAdapter for ShellTmuxAdapter {
     }
 
     fn session_exists(&self, session_id: &str) -> Result<bool, CcxError> {
-        let name = session_name(session_id);
+        let target = session_target(session_id);
         let output = Command::new("tmux")
-            .args(["has-session", "-t", &name])
+            .args(["has-session", "-t", &target])
             .output()?;
         Ok(output.status.success())
     }
 
     fn get_pane_pid(&self, session_id: &str) -> Result<Option<u32>, CcxError> {
-        let name = session_name(session_id);
+        let target = session_target(session_id);
         let output = Command::new("tmux")
-            .args(["display-message", "-p", "-F", "#{pane_pid}", "-t", &name])
+            .args(["display-message", "-p", "-F", "#{pane_pid}", "-t", &target])
             .output()?;
         if !output.status.success() {
             return Ok(None);
@@ -137,9 +143,9 @@ impl TmuxAdapter for ShellTmuxAdapter {
     }
 
     fn get_pane_cwd(&self, session_id: &str) -> Result<Option<String>, CcxError> {
-        let name = session_name(session_id);
+        let target = session_target(session_id);
         let output = Command::new("tmux")
-            .args(["display-message", "-p", "-F", "#{pane_current_path}", "-t", &name])
+            .args(["display-message", "-p", "-F", "#{pane_current_path}", "-t", &target])
             .output()?;
         if !output.status.success() {
             return Ok(None);
@@ -153,9 +159,9 @@ impl TmuxAdapter for ShellTmuxAdapter {
     }
 
     fn send_keys(&self, session_id: &str, keys: &str) -> Result<(), CcxError> {
-        let name = session_name(session_id);
+        let target = session_target(session_id);
         let output = Command::new("tmux")
-            .args(["send-keys", "-t", &name, keys])
+            .args(["send-keys", "-t", &target, keys])
             .output()?;
         if !output.status.success() {
             return Err(CcxError::Other(anyhow::anyhow!(
@@ -167,9 +173,9 @@ impl TmuxAdapter for ShellTmuxAdapter {
     }
 
     fn send_literal(&self, session_id: &str, text: &str) -> Result<(), CcxError> {
-        let name = session_name(session_id);
+        let target = session_target(session_id);
         let output = Command::new("tmux")
-            .args(["send-keys", "-l", "-t", &name, text])
+            .args(["send-keys", "-l", "-t", &target, text])
             .output()?;
         if !output.status.success() {
             return Err(CcxError::Other(anyhow::anyhow!(
