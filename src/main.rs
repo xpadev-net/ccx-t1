@@ -3,6 +3,7 @@ mod config;
 mod domain;
 mod error;
 mod persistence;
+mod watcher;
 
 use clap::{Parser, Subcommand};
 
