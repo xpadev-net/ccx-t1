@@ -43,13 +43,13 @@ pub struct TaskWatcher {
 
 impl TaskWatcher {
     pub fn new(
-        task_file: &std::path::Path,
+        task_file: &camino::Utf8Path,
         project_id: String,
         work_execution_id: String,
         project_dir: Utf8PathBuf,
     ) -> Result<Self, CcxError> {
         let mut state = TaskWatcherState { last_seen_hash: None };
-        let file = task_file.to_owned();
+        let file = task_file.as_std_path().to_owned();
 
         let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
             let ev = match res {
@@ -81,7 +81,7 @@ impl TaskWatcher {
             }
         })?;
 
-        watcher.watch(task_file, RecursiveMode::NonRecursive)?;
+        watcher.watch(task_file.as_std_path(), RecursiveMode::NonRecursive)?;
         Ok(Self { _watcher: watcher })
     }
 }

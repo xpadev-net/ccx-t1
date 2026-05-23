@@ -46,7 +46,7 @@ impl SourceWatcher {
     ) -> Result<Self, CcxError> {
         let mut state = SourceWatcherState { last_seen_hash: None };
         let file = source_file.as_std_path().to_owned();
-        let source_path = source_file.to_string().to_owned();
+        let source_path = source_file.to_string();
 
         let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
             let ev = match res {
