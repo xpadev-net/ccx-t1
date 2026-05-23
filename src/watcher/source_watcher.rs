@@ -40,13 +40,13 @@ pub struct SourceWatcher {
 
 impl SourceWatcher {
     pub fn new(
-        source_file: &std::path::Path,
+        source_file: &camino::Utf8Path,
         project_id: String,
         project_dir: Utf8PathBuf,
     ) -> Result<Self, CcxError> {
         let mut state = SourceWatcherState { last_seen_hash: None };
-        let file = source_file.to_owned();
-        let source_path = source_file.to_string_lossy().into_owned();
+        let file = source_file.as_std_path().to_owned();
+        let source_path = source_file.to_string().to_owned();
 
         let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
             let ev = match res {
@@ -78,7 +78,7 @@ impl SourceWatcher {
             }
         })?;
 
-        watcher.watch(source_file, RecursiveMode::NonRecursive)?;
+        watcher.watch(source_file.as_std_path(), RecursiveMode::NonRecursive)?;
         Ok(Self { _watcher: watcher })
     }
 }

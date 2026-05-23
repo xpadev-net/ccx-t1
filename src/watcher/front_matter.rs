@@ -15,8 +15,17 @@ pub struct TaskFrontMatter {
 /// Returns `Err` only when the front matter block is present but contains
 /// invalid YAML.
 pub fn parse_front_matter(content: &str) -> Result<TaskFrontMatter, serde_yaml::Error> {
+    // Normalize CRLF to LF so delimiter search and YAML extraction are consistent.
+    let normalized;
+    let content: &str = if content.contains('\r') {
+        normalized = content.replace("\r\n", "\n").replace('\r', "\n");
+        &normalized
+    } else {
+        content
+    };
+
     // Allow leading blank lines before the opening delimiter.
-    let trimmed = content.trim_start_matches(|c| c == '\r' || c == '\n');
+    let trimmed = content.trim_start_matches('\n');
 
     if !trimmed.starts_with("---") {
         return Ok(TaskFrontMatter::default());
@@ -24,19 +33,20 @@ pub fn parse_front_matter(content: &str) -> Result<TaskFrontMatter, serde_yaml::
 
     // The opening --- must be followed by a newline, not more dashes or text.
     let rest = &trimmed[3..];
-    let body = if let Some(s) = rest.strip_prefix('\n') {
-        s
-    } else if let Some(s) = rest.strip_prefix("\r\n") {
-        s
-    } else {
-        return Ok(TaskFrontMatter::default());
+    let body = match rest.strip_prefix('\n') {
+        Some(s) => s,
+        None => return Ok(TaskFrontMatter::default()),
     };
 
-    // Find the closing delimiter: \n--- followed by \n, \r\n, or end-of-string.
+    // Find the closing delimiter: \n--- followed by \n or end-of-string.
     if let Some(pos) = body.find("\n---") {
         let after_close = &body[pos + 4..];
-        if after_close.is_empty() || after_close.starts_with('\n') || after_close.starts_with("\r\n") {
-            return serde_yaml::from_str(&body[..pos]);
+        if after_close.is_empty() || after_close.starts_with('\n') {
+            let yaml_content = &body[..pos];
+            if yaml_content.trim().is_empty() {
+                return Ok(TaskFrontMatter::default());
+            }
+            return serde_yaml::from_str(yaml_content);
         }
     }
 
@@ -91,6 +101,21 @@ mod tests {
         let content = "\n\n---\nstatus: pr_open\n---\n";
         let result = parse_front_matter(content).unwrap();
         assert_eq!(result.status.as_deref(), Some("pr_open"));
+    }
+
+    #[test]
+    fn empty_front_matter_block_returns_default() {
+        // Blank line between delimiters — must not error.
+        let content = "---\n\n---\n# body\n";
+        let result = parse_front_matter(content).unwrap();
+        assert_eq!(result, TaskFrontMatter::default());
+    }
+
+    #[test]
+    fn crlf_line_endings_are_handled() {
+        let content = "---\r\nstatus: working\r\n---\r\n# body\r\n";
+        let result = parse_front_matter(content).unwrap();
+        assert_eq!(result.status.as_deref(), Some("working"));
     }
 
     #[test]
