@@ -217,7 +217,11 @@ pub fn make_adapter() -> Box<dyn CmuxAdapter> {
 }
 
 pub fn make_adapter_from(socket_path: &str) -> Box<dyn CmuxAdapter> {
-    if std::fs::metadata(socket_path).is_ok() {
+    use std::os::unix::fs::FileTypeExt;
+    let is_socket = std::fs::metadata(socket_path)
+        .map(|m| m.file_type().is_socket())
+        .unwrap_or(false);
+    if is_socket {
         Box::new(SocketCmuxAdapter::new(socket_path))
     } else {
         warn!("cmux socket not found at {socket_path}, running headless");
