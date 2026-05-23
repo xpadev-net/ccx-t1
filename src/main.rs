@@ -8,6 +8,7 @@ mod git;
 mod persistence;
 mod recovery;
 mod watcher;
+mod work;
 
 use clap::{Parser, Subcommand};
 

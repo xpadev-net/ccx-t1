@@ -1,9 +1,10 @@
 use clap::Args;
 
-use crate::config::project_dir;
+use crate::config::{load_project_config, project_dir};
 use crate::domain::event::generate_id;
 use crate::error::CcxError;
 use crate::git::github::{execute_merge, MergeConfig};
+use crate::work::cleanup::{run_cleanup, CleanupConfig};
 
 // ---------------------------------------------------------------------------
 // work create
@@ -60,24 +61,49 @@ pub fn create(args: CreateArgs) -> Result<(), CcxError> {
 #[derive(Debug, Args)]
 pub struct CleanupArgs {
     #[arg(long)]
+    pub project_id: String,
+    #[arg(long)]
     pub work_execution_id: String,
     #[arg(long)]
     pub json: bool,
 }
 
 pub fn cleanup(args: CleanupArgs) -> Result<(), CcxError> {
+    let dir = project_dir(&args.project_id)?;
+    let cfg = load_project_config(&args.project_id)?;
+
+    let config = CleanupConfig {
+        project_id: args.project_id.clone(),
+        project_dir: dir,
+        work_execution_id: args.work_execution_id.clone(),
+        cleanup_policy: cfg.cleanup_policy,
+        keep_last_n: cfg.keep_last_n,
+        keep_for_days: cfg.keep_for_days,
+        canonical_repo: cfg.canonical_repo,
+    };
+    let result = run_cleanup(&config)?;
+
     if args.json {
         println!(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({
                 "work_execution_id": args.work_execution_id,
                 "status": "cleaned_up",
-                "removed_worktree": true,
-                "closed_sessions": [],
+                "removed_worktree": result.removed_worktree,
+                "closed_sessions": result.closed_sessions,
             }))?
         );
     } else {
-        println!("cleanup {} (skeleton — not yet implemented)", args.work_execution_id);
+        println!("work_execution_id: {}", args.work_execution_id);
+        println!("removed_worktree:  {}", result.removed_worktree);
+        if result.closed_sessions.is_empty() {
+            println!("closed_sessions:   none");
+        } else {
+            println!("closed_sessions:");
+            for id in &result.closed_sessions {
+                println!("  - {id}");
+            }
+        }
     }
     Ok(())
 }

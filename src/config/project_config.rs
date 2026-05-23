@@ -38,5 +38,16 @@ pub struct ProjectConfig {
     pub task_source_file: Utf8PathBuf,
     pub gh_review_hook: GhReviewHook,
     pub cleanup_policy: CleanupPolicy,
+    /// Number of most-recent work executions whose worktrees are preserved
+    /// when cleanup_policy is KeepLastN.
+    #[serde(default = "default_keep_last_n")]
+    pub keep_last_n: u32,
+    /// Number of days after selected_at before a worktree is eligible for
+    /// removal when cleanup_policy is KeepForDuration.
+    #[serde(default = "default_keep_for_days")]
+    pub keep_for_days: u64,
     pub created_at: String,
 }
+
+fn default_keep_last_n() -> u32 { 5 }
+fn default_keep_for_days() -> u64 { 7 }

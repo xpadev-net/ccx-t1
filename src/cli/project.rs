@@ -37,6 +37,8 @@ pub fn register(args: RegisterArgs) -> Result<(), CcxError> {
         task_source_file: args.task_source_file,
         gh_review_hook: GhReviewHook::default(),
         cleanup_policy: CleanupPolicy::default(),
+        keep_last_n: 5,
+        keep_for_days: 7,
         created_at,
     };
 
