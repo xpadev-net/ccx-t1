@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -10,6 +10,7 @@ use crate::error::CcxError;
 
 const SOCKET_PATH: &str = "/tmp/cmux.sock";
 const RPC_IO_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_RESPONSE_BYTES: u64 = 64 * 1024;
 
 // ---------------------------------------------------------------------------
 // Trait
@@ -120,7 +121,7 @@ impl SocketCmuxAdapter {
 
         let mut reader = BufReader::new(&stream);
         let mut response_line = String::new();
-        let n = reader.read_line(&mut response_line)?;
+        let n = reader.by_ref().take(MAX_RESPONSE_BYTES).read_line(&mut response_line)?;
         if n == 0 {
             return Err(CcxError::Other(anyhow::anyhow!(
                 "cmux: server closed connection without sending a response"
@@ -165,12 +166,15 @@ impl CmuxAdapter for SocketCmuxAdapter {
 
     fn create_agent_tab(&self, spec: &AgentSessionSpec) -> Result<String, CcxError> {
         let cwd = spec.worktree_path.as_ref().unwrap_or(&spec.cwd_path);
+        let cwd_str = cwd.to_str().ok_or_else(|| {
+            CcxError::Other(anyhow::anyhow!("cwd path is not valid UTF-8: {cwd:?}"))
+        })?;
         let result = self.send_rpc(
             "surface.create",
             serde_json::json!({
                 "workspace_id": spec.cmux_workspace_id,
                 "title": format!("{} ({})", spec.role, spec.session_id),
-                "cwd": cwd,
+                "cwd": cwd_str,
                 "command": spec.startup_command,
                 "envs": spec.envs,
             }),
