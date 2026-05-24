@@ -182,24 +182,12 @@ mod tests {
 
     #[test]
     fn all_known_status_values_round_trip() {
-        for status in [
-            "assigned",
-            "working",
-            "pr_open",
-            "gate_check",
-            "review_fixing",
-            "merge_ready",
-            "returned",
-            "blocked",
-            "failed",
-            "followup_required",
-            "merged",
-        ] {
+        for status in ALLOWED_STATUS_VALUES {
             let content = format!("---\nstatus: {status}\n---\n");
             let result = parse_front_matter(&content).unwrap();
             assert_eq!(
                 result.status.as_deref(),
-                Some(status),
+                Some(*status),
                 "failed for status={status}"
             );
         }

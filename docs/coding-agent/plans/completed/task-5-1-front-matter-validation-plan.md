@@ -35,11 +35,11 @@ User requested iterative execution from `z/tasks.md`; Orchestrator waived separa
 
 ## Progress Log
 
-- 2026-05-25: Plan created; Task_1 started.
-- 2026-05-25: Added status allow-list validation for task.md front matter and watcher coverage for invalid status values.
-- 2026-05-25: Worker validation passed: `rustfmt --check src/watcher/front_matter.rs src/watcher/task_watcher.rs`; `cargo test front_matter`; `cargo test task_watcher`.
-- 2026-05-25: Reviewer validation passed with `APPROVED` and no findings.
+- 2026-05-24: Plan created; Task_1 started.
+- 2026-05-24: Added status allow-list validation for task.md front matter and watcher coverage for invalid status values.
+- 2026-05-24: Worker validation passed: `rustfmt --check src/watcher/front_matter.rs src/watcher/task_watcher.rs`; `cargo test front_matter`; `cargo test task_watcher`.
+- 2026-05-24: Reviewer validation passed with `APPROVED` and no findings.
 
 ## Decision Log
 
-- 2026-05-25: Scoped validation to parser sanitization because front matter parsing already exists and the ledger's remaining unchecked item is defensive validation.
+- 2026-05-24: Scoped validation to parser sanitization because front matter parsing already exists and the ledger's remaining unchecked item is defensive validation.
