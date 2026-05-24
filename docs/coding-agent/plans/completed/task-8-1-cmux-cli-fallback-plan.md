@@ -55,6 +55,7 @@ Research waived: existing `cmux_adapter.rs` and `gui/CLI/cmux.swift` confirm `cm
 - 2026-05-25: Addressed fallback lock feedback by using an `Establishing` state with a condition variable, so only initial mode selection waits while established CLI calls run without holding the mode lock.
 - 2026-05-25: Addressed response-shape feedback by returning `Null` for result-less JSON-RPC envelopes while preserving raw CLI result objects, and documented the `waitpid`/`Child::kill` split.
 - 2026-05-25: Addressed condvar panic feedback by adding an establishing guard, and avoided double-reaping by letting the waiter own reaping after `Child::kill`.
+- 2026-05-25: Addressed recycled-PID feedback by making `kill_child` a no-op when `try_wait` reports the waiter already reaped the process.
 
 ## Decision Log
 

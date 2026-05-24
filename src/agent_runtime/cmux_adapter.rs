@@ -425,7 +425,8 @@ fn kill_child(child: &Arc<Mutex<Child>>) {
             let _ = child.kill();
         }
         Err(_) => {
-            let _ = child.kill();
+            // The waiter thread probably reaped the process already (ECHILD).
+            // Avoid signalling a PID that the kernel may have recycled.
         }
     }
 }
