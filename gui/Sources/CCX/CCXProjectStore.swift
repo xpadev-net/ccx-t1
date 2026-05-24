@@ -123,7 +123,7 @@ public final class CCXProjectStore: ObservableObject {
         isRefreshing = true
         let paths = self.paths
         let projectId = self.projectId
-        refreshQueue.async { [weak self] in
+        refreshQueue.async {
             let snapshot = Snapshot.load(paths: paths, projectId: projectId)
             Task { @MainActor [weak self] in
                 guard let self else { return }
