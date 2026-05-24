@@ -19,6 +19,10 @@ private let SQLITE_TRANSIENT_DESTRUCTOR = unsafeBitCast(
 /// whenever an FSEvent fires on the project directory. It is intentionally
 /// read-only: mutations must go through the controller CLI to preserve
 /// event-sourcing invariants.
+///
+/// All disk and SQLite I/O happens on a dedicated background queue; only the
+/// final `@Published` writes hop back to the main actor. This keeps the main
+/// thread responsive even when agents are writing into the project directory.
 @MainActor
 public final class CCXProjectStore: ObservableObject {
     @Published public private(set) var project: CCXProjectSummary?
@@ -28,21 +32,23 @@ public final class CCXProjectStore: ObservableObject {
     @Published public private(set) var lastRefreshError: String?
 
     public let projectId: String
-    private let projectDir: URL
-    private let sqlitePath: URL
-    private let eventsPath: URL
-    private let configPath: URL
+    private let paths: Paths
 
     private var eventStream: FSEventStreamRef?
     private let refreshQueue = DispatchQueue(label: "ccx.project-store.refresh")
+    private var isRefreshing = false
+    private var refreshPending = false
 
     public init(projectId: String, ccxHome: URL? = nil) {
         self.projectId = projectId
         let home = ccxHome ?? Self.defaultCCXHome()
-        self.projectDir = home.appendingPathComponent("projects/\(projectId)", isDirectory: true)
-        self.sqlitePath = projectDir.appendingPathComponent("state.sqlite")
-        self.eventsPath = projectDir.appendingPathComponent("events.jsonl")
-        self.configPath = projectDir.appendingPathComponent("project.json")
+        let dir = home.appendingPathComponent("projects/\(projectId)", isDirectory: true)
+        self.paths = Paths(
+            projectDir: dir,
+            sqlite: dir.appendingPathComponent("state.sqlite"),
+            events: dir.appendingPathComponent("events.jsonl"),
+            config: dir.appendingPathComponent("project.json")
+        )
     }
 
     // `nonisolated` lets the deinit run off the main actor; FSEventStream APIs
@@ -86,14 +92,14 @@ public final class CCXProjectStore: ObservableObject {
             Task { @MainActor in store.refresh() }
         }
 
-        let path = projectDir.path as CFString
-        let paths = [path] as CFArray
+        let path = paths.projectDir.path as CFString
+        let pathsArray = [path] as CFArray
         let latency: CFTimeInterval = 0.25
         guard let stream = FSEventStreamCreate(
             kCFAllocatorDefault,
             callback,
             context,
-            paths,
+            pathsArray,
             FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
             latency,
             FSEventStreamCreateFlags(kFSEventStreamCreateFlagFileEvents)
@@ -105,164 +111,259 @@ public final class CCXProjectStore: ObservableObject {
         self.eventStream = stream
     }
 
+    /// Schedule a refresh on the background queue. If one is already running
+    /// when called, we set `refreshPending` so a fresh snapshot fires exactly
+    /// once after the in-flight load completes — coalescing the FSEvent burst
+    /// that agents typically produce.
     public func refresh() {
-        loadProjectConfig()
-        loadWorkExecutionsAndSessions()
-        loadRecentEvents()
-    }
-
-    private func loadProjectConfig() {
-        guard let data = try? Data(contentsOf: configPath),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            project = nil
+        if isRefreshing {
+            refreshPending = true
             return
         }
-        project = CCXProjectSummary(
-            projectId: (json["project_id"] as? String) ?? projectId,
-            displaySlug: (json["display_slug"] as? String) ?? "",
-            canonicalRepo: (json["canonical_repo"] as? String) ?? "",
-            taskSourceFile: (json["task_source_file"] as? String) ?? "",
-            createdAt: (json["created_at"] as? String) ?? ""
-        )
-    }
-
-    private func loadWorkExecutionsAndSessions() {
-        var db: OpaquePointer?
-        let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
-        guard sqlite3_open_v2(sqlitePath.path, &db, flags, nil) == SQLITE_OK, let db else {
-            lastRefreshError = String(
-                localized: "ccx.error.sqliteOpen",
-                defaultValue: "Cannot open state.sqlite (controller may not have written it yet)."
-            )
-            workExecutions = []
-            agentSessions = []
-            if let db { sqlite3_close(db) }
-            return
-        }
-        defer { sqlite3_close(db) }
-        lastRefreshError = nil
-        workExecutions = queryWorkExecutions(db: db)
-        agentSessions = queryAgentSessions(db: db)
-    }
-
-    private func queryWorkExecutions(db: OpaquePointer) -> [CCXWorkExecution] {
-        let sql = """
-        SELECT work_execution_id, project_id, state, branch_name, worktree_path,
-               task_file_path, pr_number, pr_url, head_commit, display_text,
-               selected_at, artifact_state, sync_status
-        FROM work_executions
-        WHERE project_id = ?
-        ORDER BY COALESCE(selected_at, '') DESC
-        LIMIT 200
-        """
-        return prepareAndStep(db: db, sql: sql, bind: projectId) { stmt in
-            CCXWorkExecution(
-                workExecutionId: Self.column(stmt, 0) ?? "",
-                projectId: Self.column(stmt, 1) ?? "",
-                state: Self.column(stmt, 2) ?? "",
-                branchName: Self.column(stmt, 3),
-                worktreePath: Self.column(stmt, 4),
-                taskFilePath: Self.column(stmt, 5),
-                prNumber: Self.intColumn(stmt, 6),
-                prUrl: Self.column(stmt, 7),
-                headCommit: Self.column(stmt, 8),
-                displayText: Self.column(stmt, 9),
-                selectedAt: Self.column(stmt, 10),
-                artifactState: Self.column(stmt, 11),
-                syncStatus: Self.column(stmt, 12)
-            )
-        }
-    }
-
-    private func queryAgentSessions(db: OpaquePointer) -> [CCXAgentSession] {
-        let sql = """
-        SELECT agent_session_id, project_id, work_execution_id, state, role,
-               attach_mode, cmux_tab_id, tmux_session_id, pid, cwd,
-               started_at, last_heartbeat_at, exit_code
-        FROM agent_sessions
-        WHERE project_id = ?
-        ORDER BY COALESCE(started_at, '') DESC
-        LIMIT 200
-        """
-        return prepareAndStep(db: db, sql: sql, bind: projectId) { stmt in
-            CCXAgentSession(
-                agentSessionId: Self.column(stmt, 0) ?? "",
-                projectId: Self.column(stmt, 1) ?? "",
-                workExecutionId: Self.column(stmt, 2),
-                state: Self.column(stmt, 3) ?? "",
-                role: Self.column(stmt, 4) ?? "",
-                attachMode: Self.column(stmt, 5),
-                cmuxTabId: Self.column(stmt, 6),
-                tmuxSessionId: Self.column(stmt, 7),
-                pid: Self.intColumn(stmt, 8),
-                cwd: Self.column(stmt, 9),
-                startedAt: Self.column(stmt, 10),
-                lastHeartbeatAt: Self.column(stmt, 11),
-                exitCode: Self.intColumn(stmt, 12)
-            )
-        }
-    }
-
-    private func prepareAndStep<T>(
-        db: OpaquePointer,
-        sql: String,
-        bind: String,
-        rowMap: (OpaquePointer) -> T
-    ) -> [T] {
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
-            if let stmt { sqlite3_finalize(stmt) }
-            return []
-        }
-        defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_text(stmt, 1, bind, -1, SQLITE_TRANSIENT_DESTRUCTOR)
-        var rows: [T] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            rows.append(rowMap(stmt))
-        }
-        return rows
-    }
-
-    private static func column(_ stmt: OpaquePointer, _ idx: Int32) -> String? {
-        guard let cstr = sqlite3_column_text(stmt, idx) else { return nil }
-        return String(cString: cstr)
-    }
-
-    private static func intColumn(_ stmt: OpaquePointer, _ idx: Int32) -> Int64? {
-        if sqlite3_column_type(stmt, idx) == SQLITE_NULL { return nil }
-        return sqlite3_column_int64(stmt, idx)
-    }
-
-    /// Tail the JSONL log and decode the most recent N entries. The audit log
-    /// can grow large, so we cap by line count rather than memory size.
-    private func loadRecentEvents() {
-        guard let handle = try? FileHandle(forReadingFrom: eventsPath) else {
-            recentEvents = []
-            return
-        }
-        defer { try? handle.close() }
-        guard let data = try? handle.readToEnd(), let text = String(data: data, encoding: .utf8) else {
-            recentEvents = []
-            return
-        }
-        let lines = text.split(separator: "\n").suffix(100)
-        var entries: [CCXEventEntry] = []
-        entries.reserveCapacity(lines.count)
-        for line in lines {
-            let raw = String(line)
-            guard let data = raw.data(using: .utf8),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                continue
+        isRefreshing = true
+        let paths = self.paths
+        let projectId = self.projectId
+        refreshQueue.async {
+            let snapshot = Snapshot.load(paths: paths, projectId: projectId)
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.apply(snapshot: snapshot)
+                self.isRefreshing = false
+                if self.refreshPending {
+                    self.refreshPending = false
+                    self.refresh()
+                }
             }
-            entries.append(CCXEventEntry(
-                eventId: (json["event_id"] as? String) ?? UUID().uuidString,
-                projectId: (json["project_id"] as? String) ?? "",
-                kind: (json["kind"] as? String) ?? "unknown",
-                actor: (json["actor"] as? String) ?? "",
-                timestamp: (json["timestamp"] as? String) ?? "",
-                raw: raw
-            ))
         }
-        recentEvents = entries.reversed()
+    }
+
+    private func apply(snapshot: Snapshot) {
+        project = snapshot.project
+        workExecutions = snapshot.workExecutions
+        agentSessions = snapshot.agentSessions
+        recentEvents = snapshot.recentEvents
+        lastRefreshError = snapshot.lastRefreshError
+    }
+}
+
+// MARK: - Background snapshot loader
+
+extension CCXProjectStore {
+    struct Paths: Sendable {
+        let projectDir: URL
+        let sqlite: URL
+        let events: URL
+        let config: URL
+    }
+
+    struct Snapshot: Sendable {
+        var project: CCXProjectSummary?
+        var workExecutions: [CCXWorkExecution]
+        var agentSessions: [CCXAgentSession]
+        var recentEvents: [CCXEventEntry]
+        var lastRefreshError: String?
+
+        static func load(paths: Paths, projectId: String) -> Snapshot {
+            var snapshot = Snapshot(
+                project: nil,
+                workExecutions: [],
+                agentSessions: [],
+                recentEvents: [],
+                lastRefreshError: nil
+            )
+            snapshot.project = Self.loadProjectConfig(at: paths.config, fallbackId: projectId)
+            let (we, sessions, sqliteError) = Self.loadSqlite(at: paths.sqlite, projectId: projectId)
+            snapshot.workExecutions = we
+            snapshot.agentSessions = sessions
+            snapshot.lastRefreshError = sqliteError
+            snapshot.recentEvents = Self.loadRecentEvents(at: paths.events)
+            return snapshot
+        }
+
+        private static func loadProjectConfig(at url: URL, fallbackId: String) -> CCXProjectSummary? {
+            guard let data = try? Data(contentsOf: url),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return nil
+            }
+            return CCXProjectSummary(
+                projectId: (json["project_id"] as? String) ?? fallbackId,
+                displaySlug: (json["display_slug"] as? String) ?? "",
+                canonicalRepo: (json["canonical_repo"] as? String) ?? "",
+                taskSourceFile: (json["task_source_file"] as? String) ?? "",
+                createdAt: (json["created_at"] as? String) ?? ""
+            )
+        }
+
+        private static func loadSqlite(
+            at url: URL,
+            projectId: String
+        ) -> ([CCXWorkExecution], [CCXAgentSession], String?) {
+            var db: OpaquePointer?
+            let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
+            guard sqlite3_open_v2(url.path, &db, flags, nil) == SQLITE_OK, let db else {
+                if let db { sqlite3_close(db) }
+                let message = String(
+                    localized: "ccx.error.sqliteOpen",
+                    defaultValue: "CCX controller data is not yet available — the controller may still be starting up. Please wait a moment and try again."
+                )
+                return ([], [], message)
+            }
+            defer { sqlite3_close(db) }
+            let we = queryWorkExecutions(db: db, projectId: projectId)
+            let sessions = queryAgentSessions(db: db, projectId: projectId)
+            return (we, sessions, nil)
+        }
+
+        private static func queryWorkExecutions(db: OpaquePointer, projectId: String) -> [CCXWorkExecution] {
+            let sql = """
+            SELECT work_execution_id, project_id, state, branch_name, worktree_path,
+                   task_file_path, pr_number, pr_url, head_commit, display_text,
+                   selected_at, artifact_state, sync_status
+            FROM work_executions
+            WHERE project_id = ?
+            ORDER BY COALESCE(selected_at, '') DESC
+            LIMIT 200
+            """
+            return prepareAndStep(db: db, sql: sql, bind: projectId) { stmt in
+                CCXWorkExecution(
+                    workExecutionId: column(stmt, 0) ?? "",
+                    projectId: column(stmt, 1) ?? "",
+                    state: column(stmt, 2) ?? "",
+                    branchName: column(stmt, 3),
+                    worktreePath: column(stmt, 4),
+                    taskFilePath: column(stmt, 5),
+                    prNumber: intColumn(stmt, 6),
+                    prUrl: column(stmt, 7),
+                    headCommit: column(stmt, 8),
+                    displayText: column(stmt, 9),
+                    selectedAt: column(stmt, 10),
+                    artifactState: column(stmt, 11),
+                    syncStatus: column(stmt, 12)
+                )
+            }
+        }
+
+        private static func queryAgentSessions(db: OpaquePointer, projectId: String) -> [CCXAgentSession] {
+            let sql = """
+            SELECT agent_session_id, project_id, work_execution_id, state, role,
+                   attach_mode, cmux_tab_id, tmux_session_id, pid, cwd,
+                   started_at, last_heartbeat_at, exit_code
+            FROM agent_sessions
+            WHERE project_id = ?
+            ORDER BY COALESCE(started_at, '') DESC
+            LIMIT 200
+            """
+            return prepareAndStep(db: db, sql: sql, bind: projectId) { stmt in
+                CCXAgentSession(
+                    agentSessionId: column(stmt, 0) ?? "",
+                    projectId: column(stmt, 1) ?? "",
+                    workExecutionId: column(stmt, 2),
+                    state: column(stmt, 3) ?? "",
+                    role: column(stmt, 4) ?? "",
+                    attachMode: column(stmt, 5),
+                    cmuxTabId: column(stmt, 6),
+                    tmuxSessionId: column(stmt, 7),
+                    pid: intColumn(stmt, 8),
+                    cwd: column(stmt, 9),
+                    startedAt: column(stmt, 10),
+                    lastHeartbeatAt: column(stmt, 11),
+                    exitCode: intColumn(stmt, 12)
+                )
+            }
+        }
+
+        private static func prepareAndStep<T>(
+            db: OpaquePointer,
+            sql: String,
+            bind: String,
+            rowMap: (OpaquePointer) -> T
+        ) -> [T] {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
+                if let stmt { sqlite3_finalize(stmt) }
+                return []
+            }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_text(stmt, 1, bind, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+            var rows: [T] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                rows.append(rowMap(stmt))
+            }
+            return rows
+        }
+
+        private static func column(_ stmt: OpaquePointer, _ idx: Int32) -> String? {
+            guard let cstr = sqlite3_column_text(stmt, idx) else { return nil }
+            return String(cString: cstr)
+        }
+
+        private static func intColumn(_ stmt: OpaquePointer, _ idx: Int32) -> Int64? {
+            if sqlite3_column_type(stmt, idx) == SQLITE_NULL { return nil }
+            return sqlite3_column_int64(stmt, idx)
+        }
+
+        /// Tail the JSONL log and decode the most recent N entries.
+        /// `events.jsonl` is append-only and can grow to hundreds of megabytes
+        /// in long-running projects; we walk backwards in 64 KiB chunks until
+        /// we have enough newlines to slice out the last N lines, so memory
+        /// stays bounded regardless of file size.
+        private static let recentEventLineLimit = 100
+        private static let tailReadChunkSize = 64 * 1024
+
+        private static func loadRecentEvents(at url: URL) -> [CCXEventEntry] {
+            guard let handle = try? FileHandle(forReadingFrom: url) else {
+                return []
+            }
+            defer { try? handle.close() }
+
+            var fileLength: UInt64 = 0
+            do {
+                fileLength = try handle.seekToEnd()
+            } catch {
+                return []
+            }
+            if fileLength == 0 { return [] }
+
+            var buffer = Data()
+            var offset = fileLength
+            var newlineCount = 0
+            let targetNewlines = recentEventLineLimit + 1  // need one extra to bound the first line
+
+            while offset > 0 && newlineCount < targetNewlines {
+                let chunk = UInt64(tailReadChunkSize)
+                let readLen = min(chunk, offset)
+                let newOffset = offset - readLen
+                do {
+                    try handle.seek(toOffset: newOffset)
+                } catch {
+                    break
+                }
+                let part = (try? handle.read(upToCount: Int(readLen))) ?? Data()
+                buffer = part + buffer
+                offset = newOffset
+                newlineCount = buffer.reduce(0) { $0 + ($1 == 0x0A ? 1 : 0) }
+            }
+
+            guard let text = String(data: buffer, encoding: .utf8) else { return [] }
+            let lines = text.split(separator: "\n", omittingEmptySubsequences: true).suffix(recentEventLineLimit)
+            var entries: [CCXEventEntry] = []
+            entries.reserveCapacity(lines.count)
+            for line in lines {
+                let raw = String(line)
+                guard let data = raw.data(using: .utf8),
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    continue
+                }
+                entries.append(CCXEventEntry(
+                    eventId: (json["event_id"] as? String) ?? UUID().uuidString,
+                    projectId: (json["project_id"] as? String) ?? "",
+                    kind: (json["kind"] as? String) ?? "unknown",
+                    actor: (json["actor"] as? String) ?? "",
+                    timestamp: (json["timestamp"] as? String) ?? "",
+                    raw: raw
+                ))
+            }
+            return entries.reversed()
+        }
     }
 }

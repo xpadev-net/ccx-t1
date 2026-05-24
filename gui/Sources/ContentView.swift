@@ -5766,6 +5766,8 @@ struct ContentView: View {
             return String(localized: "commandPalette.kind.filePreview", defaultValue: "File Preview")
         case .rightSidebarTool:
             return String(localized: "commandPalette.kind.rightSidebarTool", defaultValue: "Tool")
+        case .ccxDashboard:
+            return String(localized: "commandPalette.kind.ccxDashboard", defaultValue: "CCX Dashboard")
         }
     }
 
@@ -5781,6 +5783,8 @@ struct ContentView: View {
             return ["file", "preview", "text", "pdf", "image", "audio", "video"]
         case .rightSidebarTool:
             return ["tool", "files", "find", "vault", "sidebar"]
+        case .ccxDashboard:
+            return ["ccx", "dashboard", "controller", "project"]
         }
     }
 
