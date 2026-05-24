@@ -45,6 +45,7 @@ Research waived: `env_builder.rs` already defines the expected nine variables an
 - 2026-05-25: Implemented attach env injection through `build_agent_envs` and `launch_agent`.
 - 2026-05-25: Validated with `rtk rustfmt --check src/cli/agent.rs`, `rtk cargo test attach_injects_all_agent_envs_into_tmux_launch`, and `rtk cargo test env_builder`.
 - 2026-05-25: Harness reviewer returned APPROVED with no findings.
+- 2026-05-25: Addressed `gh-review-hook` feedback by fixing non-JSON output and adding direct `--project-id` lookup for attach.
 
 ## Decision Log
 

@@ -51,6 +51,8 @@ pub fn start_orchestrator(args: StartOrchestratorArgs) -> Result<(), CcxError> {
 #[derive(Debug, Args)]
 pub struct AttachArgs {
     #[arg(long)]
+    pub project_id: Option<String>,
+    #[arg(long)]
     pub work_execution_id: String,
     /// worker | reviewer | diagnostic
     #[arg(long)]
@@ -81,7 +83,8 @@ fn attach_with_adapters(
     cmux: &dyn crate::agent_runtime::cmux_adapter::CmuxAdapter,
 ) -> Result<(), CcxError> {
     let session_id = generate_id().to_string();
-    let resolved = resolve_attach_work_execution(home, &args.work_execution_id)?;
+    let resolved =
+        resolve_attach_work_execution(home, args.project_id.as_deref(), &args.work_execution_id)?;
     let envs = build_agent_envs(&AgentEnvInput {
         project_id: &resolved.project_id,
         work_execution_id: Some(&args.work_execution_id),
@@ -135,7 +138,10 @@ fn print_attach_result(
             }))?
         );
     } else {
-        println!("agent_session_id: {session_id}  (skeleton — not yet implemented)");
+        println!(
+            "agent_session_id: {session_id}  tmux: {}  cmux_tab: {}",
+            result.tmux_session_id, result.cmux_tab_id
+        );
     }
     Ok(())
 }
@@ -151,8 +157,20 @@ struct ResolvedAttachWorkExecution {
 
 fn resolve_attach_work_execution(
     home: &Utf8Path,
+    project_id: Option<&str>,
     work_execution_id: &str,
 ) -> Result<ResolvedAttachWorkExecution, CcxError> {
+    if let Some(project_id) = project_id {
+        let project_dir = home.join("projects").join(project_id);
+        return query_attach_work_execution(project_dir, work_execution_id).and_then(|found| {
+            found.ok_or_else(|| {
+                CcxError::Other(anyhow::anyhow!(
+                    "work execution not found: {work_execution_id}"
+                ))
+            })
+        });
+    }
+
     let projects_dir = home.join("projects");
     let entries = std::fs::read_dir(&projects_dir).map_err(|e| {
         CcxError::Other(anyhow::anyhow!(
@@ -170,32 +188,42 @@ fn resolve_attach_work_execution(
         let project_dir = Utf8PathBuf::try_from(entry.path()).map_err(|e| {
             CcxError::Other(anyhow::anyhow!("project directory is not valid UTF-8: {e}"))
         })?;
-        let conn = match open_db(&project_dir) {
-            Ok(conn) => conn,
-            Err(_) => continue,
-        };
-        let mut stmt = conn.prepare(
-            "SELECT p.project_id, p.display_slug, p.canonical_repo, w.worktree_path, w.task_file_path
-               FROM work_executions w
-               JOIN projects p ON p.project_id = w.project_id
-              WHERE w.work_execution_id = ?1",
-        )?;
-        let mut rows = stmt.query(rusqlite::params![work_execution_id])?;
-        if let Some(row) = rows.next()? {
-            return Ok(ResolvedAttachWorkExecution {
-                project_id: row.get(0)?,
-                project_dir,
-                display_slug: row.get(1)?,
-                canonical_repo: row.get(2)?,
-                worktree_path: row.get(3)?,
-                task_file_path: row.get(4)?,
-            });
+        if !project_dir.join("state.sqlite").exists() {
+            continue;
+        }
+        if let Some(found) = query_attach_work_execution(project_dir, work_execution_id)? {
+            return Ok(found);
         }
     }
 
     Err(CcxError::Other(anyhow::anyhow!(
         "work execution not found: {work_execution_id}"
     )))
+}
+
+fn query_attach_work_execution(
+    project_dir: Utf8PathBuf,
+    work_execution_id: &str,
+) -> Result<Option<ResolvedAttachWorkExecution>, CcxError> {
+    let conn = open_db(&project_dir)?;
+    let mut stmt = conn.prepare(
+        "SELECT p.project_id, p.display_slug, p.canonical_repo, w.worktree_path, w.task_file_path
+           FROM work_executions w
+           JOIN projects p ON p.project_id = w.project_id
+          WHERE w.work_execution_id = ?1",
+    )?;
+    let mut rows = stmt.query(rusqlite::params![work_execution_id])?;
+    if let Some(row) = rows.next()? {
+        return Ok(Some(ResolvedAttachWorkExecution {
+            project_id: row.get(0)?,
+            project_dir,
+            display_slug: row.get(1)?,
+            canonical_repo: row.get(2)?,
+            worktree_path: row.get(3)?,
+            task_file_path: row.get(4)?,
+        }));
+    }
+    Ok(None)
 }
 
 // ---------------------------------------------------------------------------
@@ -524,6 +552,7 @@ mod tests {
 
         attach_with_adapters(
             AttachArgs {
+                project_id: Some("01JTEST00000000000000000001".into()),
                 work_execution_id: "01JTEST00000000000000000002".into(),
                 role: "worker".into(),
                 mode: "writer".into(),
