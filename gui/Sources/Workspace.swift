@@ -13188,6 +13188,57 @@ final class Workspace: Identifiable, ObservableObject {
         return toolPanel
     }
 
+    /// Open a CCX dashboard tab in the given pane. Mirrors the existing
+    /// `newRightSidebarToolSurface` helper so cmux's panel lifecycle invariants
+    /// (focus restore, bonsplit tab, surface-created event) stay consistent.
+    @discardableResult
+    func newCCXDashboardSurface(
+        inPane paneId: PaneID,
+        projectId: String,
+        focus: Bool? = nil,
+        targetIndex: Int? = nil
+    ) -> CCXDashboardPanel? {
+        let shouldFocusNewTab = focus ?? (bonsplitController.focusedPaneId == paneId)
+        let previousFocusedPanelId = focusedPanelId
+        let previousHostedView = focusedTerminalPanel?.hostedView
+
+        let panel = CCXDashboardPanel(projectId: projectId)
+        panels[panel.id] = panel
+        panelTitles[panel.id] = panel.displayTitle
+
+        guard let newTabId = bonsplitController.createTab(
+            title: panel.displayTitle,
+            icon: panel.displayIcon,
+            kind: SurfaceKind.ccxDashboard,
+            isDirty: false,
+            isLoading: false,
+            isPinned: false,
+            inPane: paneId
+        ) else {
+            panels.removeValue(forKey: panel.id)
+            panelTitles.removeValue(forKey: panel.id)
+            return nil
+        }
+
+        surfaceIdToPanelId[newTabId] = panel.id
+        if let targetIndex {
+            _ = bonsplitController.reorderTab(newTabId, toIndex: targetIndex)
+        }
+        publishCmuxSurfaceCreated(panel.id, paneId: paneId, kind: "ccx_dashboard", origin: "ccx_launch_args", focused: shouldFocusNewTab)
+
+        if shouldFocusNewTab {
+            focusPanel(panel.id)
+        } else {
+            preserveFocusAfterNonFocusSplit(
+                preferredPanelId: previousFocusedPanelId,
+                splitPanelId: panel.id,
+                previousHostedView: previousHostedView
+            )
+        }
+
+        return panel
+    }
+
     @discardableResult
     func splitPaneWithFilePreview(
         targetPane paneId: PaneID,

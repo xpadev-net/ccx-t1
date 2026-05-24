@@ -176,58 +176,33 @@ pub fn open(args: OpenArgs) -> Result<(), CcxError> {
     );
     println!("canonical_repo: {}", config.canonical_repo);
 
-    match locate_ccx_cmux_bundle() {
-        Some(name) => launch_ccx_cmux(&name, &config.project_id),
-        None => {
-            eprintln!();
-            eprintln!("ccx-cmux is not installed on this machine.");
-            eprintln!("Build it from the in-repo fork at gui/ — see gui/Sources/CCX/README.md");
-            eprintln!("for build steps. Once built, install the .app under /Applications");
-            eprintln!("(or any Launch Services–indexed location) and rerun this command.");
-            Ok(())
-        }
-    }
-}
-
-/// Returns the first ccx-cmux bundle name that Launch Services can resolve,
-/// or `None` if no candidate is installed. We probe with `mdfind` because it
-/// reflects Launch Services' indexed view; the same view `open -a` consults.
-fn locate_ccx_cmux_bundle() -> Option<String> {
+    // Try each candidate bundle name in order. `open -a <name>` exits 0 on
+    // successful launch and 1 with stderr "Unable to find application named
+    // ..." when Launch Services has no match; we treat the first success as
+    // the resolved bundle and print a graceful fallback only if every
+    // candidate fails. This is more reliable than `mdfind`, which skips
+    // unindexed locations like `/tmp` and freshly-copied app bundles.
     for &name in CCX_CMUX_BUNDLE_CANDIDATES {
-        if launch_services_has_bundle(name) {
-            return Some(name.to_string());
+        let status = Command::new("open")
+            .arg("-a")
+            .arg(name)
+            .arg("--args")
+            .arg("--project-id")
+            .arg(&config.project_id)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        if matches!(status, Ok(s) if s.success()) {
+            return Ok(());
         }
     }
-    None
-}
 
-fn launch_services_has_bundle(name: &str) -> bool {
-    let query = format!(
-        "kMDItemContentType == 'com.apple.application-bundle' && kMDItemFSName == '{}.app'",
-        name
-    );
-    let output = Command::new("mdfind").arg(query).output();
-    match output {
-        Ok(out) if out.status.success() => !out.stdout.is_empty(),
-        _ => false,
-    }
-}
-
-fn launch_ccx_cmux(bundle_name: &str, project_id: &str) -> Result<(), CcxError> {
-    let status = Command::new("open")
-        .arg("-a")
-        .arg(bundle_name)
-        .arg("--args")
-        .arg("--project-id")
-        .arg(project_id)
-        .status();
-    match status {
-        Ok(s) if s.success() => Ok(()),
-        Ok(s) => Err(CcxError::Other(anyhow::anyhow!(
-            "open -a {bundle_name} exited with status {s}"
-        ))),
-        Err(e) => Err(CcxError::Io(e)),
-    }
+    eprintln!();
+    eprintln!("ccx-cmux is not installed on this machine.");
+    eprintln!("Build it from the in-repo fork at gui/ — see gui/Sources/CCX/README.md");
+    eprintln!("for build steps. Once built, install the .app under /Applications");
+    eprintln!("(or any Launch Services–indexed location) and rerun this command.");
+    Ok(())
 }
 
 

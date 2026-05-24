@@ -4,20 +4,20 @@ import SwiftUI
 
 /// Concrete `Panel` for the CCX dashboard. Mounts a `CCXDashboardView` driven
 /// by a `CCXProjectStore` for the project id passed in at launch time
-/// (`--project-id <id>`). The panel is intentionally simple: cmux owns layout
-/// and focus, the CCX view tree owns rendering.
+/// (`--project-id <id>`). Internal access matches the sibling concrete panel
+/// types in this target (RightSidebarToolPanel etc.).
 @MainActor
-public final class CCXDashboardPanel: Panel, ObservableObject {
-    public let id: UUID
-    public let panelType: PanelType = .ccxDashboard
-    public let store: CCXProjectStore
+final class CCXDashboardPanel: Panel, ObservableObject {
+    let id: UUID
+    let panelType: PanelType = .ccxDashboard
+    let store: CCXProjectStore
 
-    @Published public private(set) var focusFlashToken: Int = 0
-    @Published public private(set) var titleOverride: String?
+    @Published private(set) var focusFlashToken: Int = 0
+    @Published private(set) var titleOverride: String?
 
     private var storeChangeCancellable: AnyCancellable?
 
-    public init(projectId: String, ccxHome: URL? = nil) {
+    init(projectId: String, ccxHome: URL? = nil) {
         self.id = UUID()
         self.store = CCXProjectStore(projectId: projectId, ccxHome: ccxHome)
         // `displayTitle` reads through to `store.project?.displaySlug`. Without
@@ -32,7 +32,7 @@ public final class CCXDashboardPanel: Panel, ObservableObject {
         }
     }
 
-    public var displayTitle: String {
+    var displayTitle: String {
         if let titleOverride { return titleOverride }
         if let slug = store.project?.displaySlug, !slug.isEmpty {
             return slug
@@ -40,37 +40,37 @@ public final class CCXDashboardPanel: Panel, ObservableObject {
         return String(localized: "ccx.panel.titleFallback", defaultValue: "CCX")
     }
 
-    public var displayIcon: String? { "rectangle.3.group" }
+    var displayIcon: String? { "rectangle.3.group" }
 
     deinit {
         storeChangeCancellable?.cancel()
         storeChangeCancellable = nil
     }
 
-    public func close() {
+    func close() {
         // CCXProjectStore tears down its FSEventStream in deinit.
     }
 
-    public func focus() {
+    func focus() {
         focusFlashToken &+= 1
     }
 
-    public func unfocus() {}
+    func unfocus() {}
 
-    public func triggerFlash(reason: WorkspaceAttentionFlashReason) {
+    func triggerFlash(reason: WorkspaceAttentionFlashReason) {
         focusFlashToken &+= 1
     }
 }
 
 /// SwiftUI host that renders a `CCXDashboardPanel` inside cmux's panel system.
-public struct CCXDashboardPanelView: View {
+struct CCXDashboardPanelView: View {
     @ObservedObject var panel: CCXDashboardPanel
 
-    public init(panel: CCXDashboardPanel) {
+    init(panel: CCXDashboardPanel) {
         self.panel = panel
     }
 
-    public var body: some View {
+    var body: some View {
         CCXDashboardView(store: panel.store)
     }
 }
