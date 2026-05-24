@@ -132,7 +132,7 @@ public final class CCXProjectStore: ObservableObject {
         guard sqlite3_open_v2(sqlitePath.path, &db, flags, nil) == SQLITE_OK, let db else {
             lastRefreshError = String(
                 localized: "ccx.error.sqliteOpen",
-                defaultValue: "Cannot open state.sqlite (controller may not have written it yet)."
+                defaultValue: "CCX controller data is not yet available — the controller may still be starting up. Please wait a moment and try again."
             )
             workExecutions = []
             agentSessions = []
