@@ -162,6 +162,11 @@ fn resolve_attach_work_execution(
 ) -> Result<ResolvedAttachWorkExecution, CcxError> {
     if let Some(project_id) = project_id {
         let project_dir = home.join("projects").join(project_id);
+        if !project_dir.join("state.sqlite").exists() {
+            return Err(CcxError::Other(anyhow::anyhow!(
+                "project not found: {project_id}"
+            )));
+        }
         return query_attach_work_execution(project_dir, work_execution_id).and_then(|found| {
             found.ok_or_else(|| {
                 CcxError::Other(anyhow::anyhow!(

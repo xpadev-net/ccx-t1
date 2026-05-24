@@ -47,6 +47,7 @@ Research waived: `env_builder.rs` already defines the expected nine variables an
 - 2026-05-25: Harness reviewer returned APPROVED with no findings.
 - 2026-05-25: Addressed `gh-review-hook` feedback by fixing non-JSON output and adding direct `--project-id` lookup for attach.
 - 2026-05-25: Addressed follow-up `gh-review-hook` feedback by skipping non-UTF-8 project scan entries.
+- 2026-05-25: Addressed fast-path ghost DB feedback by checking `state.sqlite` before opening a project DB.
 
 ## Decision Log
 
