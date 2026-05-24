@@ -38,6 +38,7 @@ User requested iterative execution from `z/tasks.md`; Orchestrator waived separa
 - 2026-05-24: Added best-effort active orchestrator notification after task source file change events are appended and projected.
 - 2026-05-24: Worker validation passed: `rustfmt --check src/watcher/source_watcher.rs`; `cargo test source_watcher`.
 - 2026-05-24: Reviewer validation passed with `APPROVED` and no findings.
+- 2026-05-24: gh-review-hook feedback addressed by moving notification DB and watcher test helpers into shared watcher utilities. Validation passed: `rustfmt --check src/watcher/mod.rs src/watcher/source_watcher.rs src/watcher/task_watcher.rs`; `cargo test source_watcher`; `cargo test task_watcher`.
 
 ## Decision Log
 

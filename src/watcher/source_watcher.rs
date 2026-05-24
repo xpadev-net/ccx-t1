@@ -5,7 +5,7 @@ use rusqlite::{Connection, OptionalExtension};
 use crate::agent_runtime::cmux_adapter::{make_adapter, CmuxAdapter};
 use crate::domain::event::{Actor, Event, EventData, TaskSourceFileChangedPayload};
 use crate::error::CcxError;
-use crate::watcher::sha256_hex;
+use crate::watcher::{open_notification_db, sha256_hex};
 
 /// Per-project deduplication state for the source file watcher.
 pub struct SourceWatcherState {
@@ -70,15 +70,6 @@ fn notify_orchestrator_source_file_changed(
         "info",
     )?;
     Ok(true)
-}
-
-fn open_notification_db(project_dir: &camino::Utf8Path) -> Result<Connection, CcxError> {
-    let conn = Connection::open_with_flags(
-        project_dir.join("state.sqlite").as_std_path(),
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )?;
-    conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;")?;
-    Ok(conn)
 }
 
 fn notify_orchestrator_source_file_changed_best_effort(
@@ -157,79 +148,13 @@ impl SourceWatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent_runtime::cmux_adapter::AgentSessionSpec;
     use crate::persistence::sqlite::open_db;
-    use std::sync::Mutex;
+    use crate::watcher::test_support::{seed_project_and_orchestrator, SpyCmuxAdapter};
 
     fn state() -> SourceWatcherState {
         SourceWatcherState {
             last_seen_hash: None,
         }
-    }
-
-    struct SpyCmuxAdapter {
-        notifications: Mutex<Vec<(String, String, String)>>,
-    }
-
-    impl SpyCmuxAdapter {
-        fn new() -> Self {
-            Self {
-                notifications: Mutex::new(vec![]),
-            }
-        }
-    }
-
-    impl CmuxAdapter for SpyCmuxAdapter {
-        fn ensure_workspace(
-            &self,
-            _project_id: &str,
-            _display_slug: &str,
-            _canonical_repo: &str,
-        ) -> Result<String, CcxError> {
-            Ok("ws".into())
-        }
-
-        fn create_agent_tab(&self, _spec: &AgentSessionSpec) -> Result<String, CcxError> {
-            Ok("tab".into())
-        }
-
-        fn close_tab(&self, _tab_id: &str) -> Result<(), CcxError> {
-            Ok(())
-        }
-
-        fn notify_user(&self, tab_id: &str, message: &str, level: &str) -> Result<(), CcxError> {
-            self.notifications.lock().unwrap().push((
-                tab_id.to_string(),
-                message.to_string(),
-                level.to_string(),
-            ));
-            Ok(())
-        }
-    }
-
-    fn seed_project_and_orchestrator(
-        conn: &rusqlite::Connection,
-        project_id: &str,
-        cmux_tab_id: &str,
-    ) {
-        conn.execute(
-            "INSERT INTO projects (
-                project_id, display_slug, canonical_repo, task_source_file, created_at
-             ) VALUES (?1, 'test', '/tmp/repo', '/tmp/repo/tasks.md', '2026-05-24T00:00:00Z')",
-            rusqlite::params![project_id],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO agent_sessions (
-                agent_session_id, project_id, work_execution_id, state, role, attach_mode,
-                cmux_tab_id, tmux_session_id, cwd, started_at, last_heartbeat_at
-             ) VALUES (
-                '01JTEST00000000000000000002', ?1, NULL, 'running', 'orchestrator', NULL,
-                ?2, 'tmux-orch', '/tmp/repo', '2026-05-24T00:00:01Z', '2026-05-24T00:00:01Z'
-             )",
-            rusqlite::params![project_id, cmux_tab_id],
-        )
-        .unwrap();
     }
 
     #[test]
@@ -302,7 +227,7 @@ mod tests {
         .unwrap();
 
         assert!(notified);
-        let notifications = cmux.notifications.lock().unwrap();
+        let notifications = cmux.notifications();
         assert_eq!(notifications.len(), 1);
         assert_eq!(notifications[0].0, "tab-orch");
         assert_eq!(notifications[0].2, "info");
@@ -325,7 +250,7 @@ mod tests {
         .unwrap();
 
         assert!(!notified);
-        assert!(cmux.notifications.lock().unwrap().is_empty());
+        assert!(cmux.notifications().is_empty());
     }
 
     #[test]
@@ -361,17 +286,6 @@ mod tests {
         .unwrap();
 
         assert!(!notified);
-        assert!(cmux.notifications.lock().unwrap().is_empty());
-    }
-
-    #[test]
-    fn notification_db_open_does_not_create_missing_database() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = camino::Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
-
-        let result = open_notification_db(&dir);
-
-        assert!(result.is_err());
-        assert!(!dir.join("state.sqlite").exists());
+        assert!(cmux.notifications().is_empty());
     }
 }
