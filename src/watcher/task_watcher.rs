@@ -96,7 +96,10 @@ fn notify_orchestrator_task_file_changed(
 }
 
 fn open_notification_db(project_dir: &camino::Utf8Path) -> Result<Connection, CcxError> {
-    let conn = Connection::open(project_dir.join("state.sqlite").as_std_path())?;
+    let conn = Connection::open_with_flags(
+        project_dir.join("state.sqlite").as_std_path(),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE,
+    )?;
     conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;")?;
     Ok(conn)
 }
@@ -492,19 +495,13 @@ mod tests {
     }
 
     #[test]
-    fn notification_db_open_does_not_create_schema() {
+    fn notification_db_open_does_not_create_missing_database() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = camino::Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
 
-        let conn = open_notification_db(&dir).unwrap();
-        let table_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
+        let result = open_notification_db(&dir);
 
-        assert_eq!(table_count, 0);
+        assert!(result.is_err());
+        assert!(!dir.join("state.sqlite").exists());
     }
 }
