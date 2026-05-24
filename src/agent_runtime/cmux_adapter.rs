@@ -2,12 +2,10 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
-use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::sync::{mpsc, Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tracing::warn;
 
@@ -274,37 +272,143 @@ impl CliCmuxAdapter {
                 ))
             })?;
 
-        let pid = child.id();
-        let (done_tx, done_rx) = mpsc::channel();
-        let timed_out = Arc::new(AtomicBool::new(false));
-        let timed_out_for_thread = Arc::clone(&timed_out);
-        std::thread::spawn(move || {
-            if matches!(
-                done_rx.recv_timeout(RPC_IO_TIMEOUT),
-                Err(mpsc::RecvTimeoutError::Timeout)
-            ) {
-                timed_out_for_thread.store(true, Ordering::SeqCst);
-                let _ = Command::new("kill")
-                    .arg("-KILL")
-                    .arg(pid.to_string())
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .status();
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| CcxError::Other(anyhow::anyhow!("cmux CLI stdout pipe unavailable")))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| CcxError::Other(anyhow::anyhow!("cmux CLI stderr pipe unavailable")))?;
+        let child = Arc::new(Mutex::new(child));
+        let (event_tx, event_rx) = mpsc::channel();
+
+        spawn_limited_reader("stdout", stdout, event_tx.clone());
+        spawn_limited_reader("stderr", stderr, event_tx.clone());
+        spawn_waiter(Arc::clone(&child), event_tx);
+
+        let deadline = Instant::now() + RPC_IO_TIMEOUT;
+        let mut status = None;
+        let mut stdout = None;
+        let mut stderr = None;
+
+        while status.is_none() || stdout.is_none() || stderr.is_none() {
+            let now = Instant::now();
+            if now >= deadline {
+                kill_child(&child);
+                return Err(CcxError::Other(anyhow::anyhow!(
+                    "cmux CLI rpc {method} timed out after {:?}",
+                    RPC_IO_TIMEOUT
+                )));
             }
-        });
 
-        let output = child.wait_with_output().map_err(CcxError::from)?;
-        let _ = done_tx.send(());
-
-        if timed_out.load(Ordering::SeqCst) && output.status.signal() == Some(9) {
-            return Err(CcxError::Other(anyhow::anyhow!(
-                "cmux CLI rpc {method} timed out after {:?}",
-                RPC_IO_TIMEOUT
-            )));
+            match event_rx.recv_timeout(deadline - now) {
+                Ok(CliProcessEvent::Exited(result)) => {
+                    status = Some(result.map_err(CcxError::from)?);
+                }
+                Ok(CliProcessEvent::Stream { name, result }) => {
+                    let bytes = result.map_err(|msg| {
+                        kill_child(&child);
+                        CcxError::Other(anyhow::anyhow!("{msg}"))
+                    })?;
+                    match name {
+                        "stdout" => stdout = Some(bytes),
+                        "stderr" => stderr = Some(bytes),
+                        _ => {}
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    kill_child(&child);
+                    return Err(CcxError::Other(anyhow::anyhow!(
+                        "cmux CLI rpc {method} timed out after {:?}",
+                        RPC_IO_TIMEOUT
+                    )));
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(CcxError::Other(anyhow::anyhow!(
+                        "cmux CLI rpc {method} process monitor stopped unexpectedly"
+                    )));
+                }
+            }
         }
 
-        Ok(output)
+        Ok(Output {
+            status: status.unwrap(),
+            stdout: stdout.unwrap(),
+            stderr: stderr.unwrap(),
+        })
+    }
+}
+
+enum CliProcessEvent {
+    Exited(std::io::Result<ExitStatus>),
+    Stream {
+        name: &'static str,
+        result: Result<Vec<u8>, String>,
+    },
+}
+
+fn spawn_waiter(child: Arc<Mutex<Child>>, event_tx: mpsc::Sender<CliProcessEvent>) {
+    std::thread::spawn(move || loop {
+        let result = {
+            let mut child = child.lock().unwrap_or_else(|e| e.into_inner());
+            child.try_wait()
+        };
+        match result {
+            Ok(Some(status)) => {
+                let _ = event_tx.send(CliProcessEvent::Exited(Ok(status)));
+                break;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+            Err(e) => {
+                let _ = event_tx.send(CliProcessEvent::Exited(Err(e)));
+                break;
+            }
+        }
+    });
+}
+
+fn spawn_limited_reader<R>(
+    name: &'static str,
+    mut reader: R,
+    event_tx: mpsc::Sender<CliProcessEvent>,
+) where
+    R: Read + Send + 'static,
+{
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let mut chunk = [0; 8192];
+        let result = loop {
+            match reader.read(&mut chunk) {
+                Ok(0) => break Ok(bytes),
+                Ok(n) => {
+                    if bytes.len() + n > MAX_RESPONSE_BYTES as usize {
+                        break Err(format!(
+                            "cmux CLI {name} exceeded {} bytes",
+                            MAX_RESPONSE_BYTES
+                        ));
+                    }
+                    bytes.extend_from_slice(&chunk[..n]);
+                }
+                Err(e) => break Err(format!("cmux CLI {name} read failed: {e}")),
+            }
+        };
+        let _ = event_tx.send(CliProcessEvent::Stream { name, result });
+    });
+}
+
+fn kill_child(child: &Arc<Mutex<Child>>) {
+    let mut child = child.lock().unwrap_or_else(|e| e.into_inner());
+    match child.try_wait() {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
     }
 }
 
@@ -623,9 +727,10 @@ mod tests {
     fn fake_cmux_script(dir: &tempfile::TempDir) -> (PathBuf, PathBuf) {
         let script = dir.path().join("cmux");
         let log = dir.path().join("calls.log");
+        let log_path = shell_single_quote(&log.to_string_lossy());
         let script_body = format!(
             r#"#!/bin/sh
-printf '%s|%s|%s\n' "$1" "$2" "$3" >> '{}'
+printf '%s|%s|%s\n' "$1" "$2" "$3" >> {log_path}
 if [ "$1" = "--version" ]; then
   exit 0
 fi
@@ -646,14 +751,17 @@ case "$2" in
     exit 3
     ;;
 esac
-"#,
-            log.display()
+"#
         );
         fs::write(&script, script_body).unwrap();
         let mut perms = fs::metadata(&script).unwrap().permissions();
         perms.set_mode(0o755);
         fs::set_permissions(&script, perms).unwrap();
         (script, log)
+    }
+
+    fn shell_single_quote(value: &str) -> String {
+        format!("'{}'", value.replace('\'', "'\\''"))
     }
 
     // --- HeadlessCmuxAdapter tests ---

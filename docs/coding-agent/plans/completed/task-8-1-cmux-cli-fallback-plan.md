@@ -18,7 +18,8 @@ Research waived: existing `cmux_adapter.rs` and `gui/CLI/cmux.swift` confirm `cm
 - acceptance:
   - Add a `CliCmuxAdapter` that invokes `cmux rpc <method> <json-params>` and parses JSON responses.
   - Wire adapter factory fallback order as socket, CLI, then headless.
-  - Preserve headless behavior when the CLI is unavailable or the CLI call fails at runtime.
+  - Fall back to headless only before CLI mode is established, including when the CLI is unavailable or the initial CLI call fails.
+  - Propagate runtime CLI errors after CLI mode has been established instead of reporting a mixed headless success.
   - Add unit tests covering successful CLI RPC calls and CLI-to-headless fallback.
   - Mark task 8.1 complete in `z/tasks.md`.
 - validation:
@@ -48,7 +49,8 @@ Research waived: existing `cmux_adapter.rs` and `gui/CLI/cmux.swift` confirm `cm
 - 2026-05-25: Addressed follow-up `gh-review-hook` findings by serializing fallback mode transitions under one lock and replacing timeout polling with a deadline helper thread.
 - 2026-05-25: Addressed final timeout/probe follow-up by making CLI availability a non-executing executable check and only treating SIGKILL from the timeout path as a timeout.
 - 2026-05-25: Addressed final timer-thread discriminator feedback by killing only on `RecvTimeoutError::Timeout`.
+- 2026-05-25: Addressed process-control feedback by replacing `wait_with_output` and external `kill` with capped stream readers and `Child::kill`, and clarified fallback acceptance criteria.
 
 ## Decision Log
 
-- 2026-05-25: Keep CLI fallback best-effort by wrapping it with headless fallback, so a present but unusable `cmux` binary does not break headless operation.
+- 2026-05-25: Keep CLI fallback best-effort only until CLI mode is established. After a successful CLI operation, later CLI runtime failures propagate as errors to avoid mixing real cmux workspace state with headless tab state.
