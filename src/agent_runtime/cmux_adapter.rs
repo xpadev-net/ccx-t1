@@ -304,7 +304,10 @@ impl CliCmuxAdapter {
 
             match event_rx.recv_timeout(deadline - now) {
                 Ok(CliProcessEvent::Exited(result)) => {
-                    status = Some(result.map_err(CcxError::from)?);
+                    status = Some(result.map_err(|e| {
+                        kill_child(&child);
+                        CcxError::from(e)
+                    })?);
                 }
                 Ok(CliProcessEvent::Stream { name, result }) => {
                     let bytes = result.map_err(|msg| {
@@ -325,6 +328,7 @@ impl CliCmuxAdapter {
                     )));
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    kill_child(&child);
                     return Err(CcxError::Other(anyhow::anyhow!(
                         "cmux CLI rpc {method} process monitor stopped unexpectedly"
                     )));
