@@ -264,7 +264,7 @@ fn prompt_with_sender(
     sender: impl FnOnce(&str, &str) -> Result<(), CcxError>,
 ) -> Result<(), CcxError> {
     let source = prompt_source(&args);
-    let message = read_message(&source)?;
+    let message = ensure_submitted_prompt(read_message(&source)?);
     sender(&args.session_id, &message)?;
 
     if args.json {
@@ -293,6 +293,13 @@ fn prompt_source(args: &PromptArgs) -> PromptSource {
     }
     // No input source specified; default to stdin for Unix-style piping.
     PromptSource::Stdin
+}
+
+fn ensure_submitted_prompt(mut message: String) -> String {
+    if !message.ends_with('\n') {
+        message.push('\n');
+    }
+    message
 }
 
 // ---------------------------------------------------------------------------
@@ -741,7 +748,7 @@ mod tests {
 
         assert_eq!(
             captured.lock().unwrap().clone(),
-            Some(("sess-1".into(), "hello".into()))
+            Some(("sess-1".into(), "hello\n".into()))
         );
     }
 
