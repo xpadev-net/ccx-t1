@@ -1,5 +1,6 @@
 use camino::Utf8PathBuf;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use rusqlite::Connection;
 use rusqlite::OptionalExtension;
 
 use crate::agent_runtime::cmux_adapter::{make_adapter, CmuxAdapter};
@@ -7,7 +8,6 @@ use crate::domain::event::{
     Actor, Event, EventData, TaskFileChangePriority, WorkExecutionTaskFileChangedPayload,
 };
 use crate::error::CcxError;
-use crate::persistence::sqlite::open_db;
 use crate::watcher::front_matter::parse_front_matter;
 use crate::watcher::sha256_hex;
 
@@ -94,6 +94,12 @@ fn notify_orchestrator_task_file_changed(
     Ok(true)
 }
 
+fn open_notification_db(project_dir: &camino::Utf8Path) -> Result<Connection, CcxError> {
+    let conn = Connection::open(project_dir.join("state.sqlite").as_std_path())?;
+    conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;")?;
+    Ok(conn)
+}
+
 fn notify_orchestrator_task_file_changed_best_effort(
     project_dir: &camino::Utf8Path,
     project_id: &str,
@@ -104,7 +110,7 @@ fn notify_orchestrator_task_file_changed_best_effort(
         return;
     }
 
-    let result = open_db(project_dir).and_then(|conn| {
+    let result = open_notification_db(project_dir).and_then(|conn| {
         let cmux = make_adapter();
         notify_orchestrator_task_file_changed(
             &conn,
@@ -185,6 +191,7 @@ impl TaskWatcher {
 mod tests {
     use super::*;
     use crate::agent_runtime::cmux_adapter::AgentSessionSpec;
+    use crate::persistence::sqlite::open_db;
     use std::sync::Mutex;
 
     fn state() -> TaskWatcherState {
@@ -444,5 +451,22 @@ mod tests {
 
         assert!(!notified);
         assert!(cmux.notifications.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn notification_db_open_does_not_create_schema() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = camino::Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
+
+        let conn = open_notification_db(&dir).unwrap();
+        let table_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(table_count, 0);
     }
 }
