@@ -98,7 +98,7 @@ fn notify_orchestrator_task_file_changed(
 fn open_notification_db(project_dir: &camino::Utf8Path) -> Result<Connection, CcxError> {
     let conn = Connection::open_with_flags(
         project_dir.join("state.sqlite").as_std_path(),
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
     )?;
     conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;")?;
     Ok(conn)
