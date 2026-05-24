@@ -213,10 +213,14 @@ pub struct WorkExecutionTaskFileChangedPayload {
     pub work_execution_id: String,
     pub new_hash: String,
     pub new_status: Option<String>,
-    #[serde(default)]
+    #[serde(default = "default_status_changed")]
     pub status_changed: bool,
     #[serde(default)]
     pub notification_priority: TaskFileChangePriority,
+}
+
+fn default_status_changed() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -477,7 +481,7 @@ mod tests {
         }"#;
 
         let payload: WorkExecutionTaskFileChangedPayload = serde_json::from_str(json).unwrap();
-        assert!(!payload.status_changed);
+        assert!(payload.status_changed);
         assert_eq!(
             payload.notification_priority,
             TaskFileChangePriority::Normal
