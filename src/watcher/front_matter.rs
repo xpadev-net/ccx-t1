@@ -11,7 +11,7 @@ struct RawTaskFrontMatter {
     status: Option<serde_yaml::Value>,
 }
 
-const ALLOWED_STATUS_VALUES: &[&str] = &[
+pub(crate) const ALLOWED_STATUS_VALUES: &[&str] = &[
     "assigned",
     "working",
     "pr_open",

@@ -507,6 +507,34 @@ mod tests {
     }
 
     #[test]
+    fn all_allowed_task_status_values_map_to_work_execution_states() {
+        use crate::watcher::front_matter::ALLOWED_STATUS_VALUES;
+
+        let expected = [
+            ("assigned", WorkExecutionState::TaskFileCreated),
+            ("working", WorkExecutionState::Running),
+            ("pr_open", WorkExecutionState::PrOpen),
+            ("gate_check", WorkExecutionState::GateCheck),
+            ("review_fixing", WorkExecutionState::ReviewFixing),
+            ("merge_ready", WorkExecutionState::MergeReady),
+            ("returned", WorkExecutionState::Returned),
+            ("blocked", WorkExecutionState::Blocked),
+            ("failed", WorkExecutionState::Failed),
+            ("followup_required", WorkExecutionState::FollowupRequired),
+            ("merged", WorkExecutionState::Merged),
+        ];
+
+        assert_eq!(ALLOWED_STATUS_VALUES.len(), expected.len());
+        for (status, state) in expected {
+            assert!(
+                ALLOWED_STATUS_VALUES.contains(&status),
+                "front matter allow-list is missing status={status}"
+            );
+            assert_eq!(task_status_to_work_execution_state(status), Some(state));
+        }
+    }
+
+    #[test]
     fn task_file_changed_without_status_leaves_state_unchanged() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = camino::Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
