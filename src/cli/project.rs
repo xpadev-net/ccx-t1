@@ -178,22 +178,31 @@ pub fn open(args: OpenArgs) -> Result<(), CcxError> {
 
     // Try each candidate bundle name in order. `open -a <name>` exits 0 on
     // successful launch and 1 with stderr "Unable to find application named
-    // ..." when Launch Services has no match; we treat the first success as
-    // the resolved bundle and print a graceful fallback only if every
-    // candidate fails. This is more reliable than `mdfind`, which skips
+    // ..." when Launch Services has no match. We capture stderr so we can
+    // distinguish "not installed" (continue to next candidate) from a real
+    // launch failure (propagate up). More reliable than `mdfind`, which skips
     // unindexed locations like `/tmp` and freshly-copied app bundles.
     for &name in CCX_CMUX_BUNDLE_CANDIDATES {
-        let status = Command::new("open")
+        let output = Command::new("open")
             .arg("-a")
             .arg(name)
             .arg("--args")
             .arg("--project-id")
             .arg(&config.project_id)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
-        if matches!(status, Ok(s) if s.success()) {
-            return Ok(());
+            .output();
+        match output {
+            Ok(out) if out.status.success() => return Ok(()),
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                if stderr.contains("Unable to find application named") {
+                    continue;
+                }
+                return Err(CcxError::Other(anyhow::anyhow!(
+                    "open -a {name} failed: {}",
+                    stderr.trim()
+                )));
+            }
+            Err(e) => return Err(CcxError::Io(e)),
         }
     }
 

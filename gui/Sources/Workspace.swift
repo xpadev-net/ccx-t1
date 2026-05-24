@@ -13215,6 +13215,9 @@ final class Workspace: Identifiable, ObservableObject {
             isPinned: false,
             inPane: paneId
         ) else {
+#if DEBUG
+            cmuxDebugLog("ccx.dashboardOpen.createTab.failed panel=\(panel.id.uuidString.prefix(8)) title=\"\(panel.displayTitle)\" pane=\(paneId.id.uuidString.prefix(8)) kind=\(SurfaceKind.ccxDashboard)")
+#endif
             panels.removeValue(forKey: panel.id)
             panelTitles.removeValue(forKey: panel.id)
             return nil
@@ -13224,7 +13227,13 @@ final class Workspace: Identifiable, ObservableObject {
         if let targetIndex {
             _ = bonsplitController.reorderTab(newTabId, toIndex: targetIndex)
         }
-        publishCmuxSurfaceCreated(panel.id, paneId: paneId, kind: "ccx_dashboard", origin: "ccx_launch_args", focused: shouldFocusNewTab)
+        publishCmuxSurfaceCreated(
+            panel.id,
+            paneId: paneId,
+            kind: Self.cmuxEventSurfaceKind(panel),
+            origin: "ccx_launch_args",
+            focused: shouldFocusNewTab
+        )
 
         if shouldFocusNewTab {
             focusPanel(panel.id)
