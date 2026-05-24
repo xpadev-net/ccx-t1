@@ -52,6 +52,7 @@ Research waived: existing `cmux_adapter.rs` and `gui/CLI/cmux.swift` confirm `cm
 - 2026-05-25: Addressed process-control feedback by replacing `wait_with_output` and external `kill` with capped stream readers and `Child::kill`, and clarified fallback acceptance criteria.
 - 2026-05-25: Addressed orphan-process feedback by killing the child before process monitor error returns.
 - 2026-05-25: Addressed waiter polling feedback by switching the process monitor to `waitpid`.
+- 2026-05-25: Addressed fallback lock feedback by using an `Establishing` state with a condition variable, so only initial mode selection waits while established CLI calls run without holding the mode lock.
 
 ## Decision Log
 
