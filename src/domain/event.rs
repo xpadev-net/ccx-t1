@@ -25,6 +25,43 @@ pub enum Actor {
     User,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EventType {
+    ProjectRegistered,
+    TaskSourceFileChanged,
+    WorkExecutionCreated,
+    WorkExecutionTaskFileCreated,
+    WorkExecutionStateChanged,
+    WorkExecutionTaskFileChanged,
+    AgentSessionCreated,
+    AgentSessionAttached,
+    AgentSessionPrompted,
+    AgentSessionHeartbeat,
+    AgentSessionHung,
+    AgentSessionStopped,
+    AgentLifecycleStop,
+    WriteLeaseAcquired,
+    WriteLeaseReleased,
+    WriteLeaseStale,
+    WriteLeaseRevoked,
+    PrOpened,
+    PrHeadUpdated,
+    GhReviewHookStarted,
+    GhReviewHookCompleted,
+    MergeLockAcquired,
+    MergeStarted,
+    MergeCompleted,
+    MergeFailed,
+    CanonicalSyncCompleted,
+    CanonicalSyncFailed,
+    CleanupStarted,
+    CleanupCompleted,
+    UserIntervention,
+    WorktreeCreated,
+    BranchCreated,
+}
+
 /// Envelope wrapping any event written to events.jsonl.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
@@ -87,6 +124,45 @@ pub enum EventData {
     UserIntervention(UserInterventionPayload),
     WorktreeCreated(WorktreeCreatedPayload),
     BranchCreated(BranchCreatedPayload),
+}
+
+impl EventData {
+    pub fn event_type(&self) -> EventType {
+        match self {
+            Self::ProjectRegistered(_) => EventType::ProjectRegistered,
+            Self::TaskSourceFileChanged(_) => EventType::TaskSourceFileChanged,
+            Self::WorkExecutionCreated(_) => EventType::WorkExecutionCreated,
+            Self::WorkExecutionTaskFileCreated(_) => EventType::WorkExecutionTaskFileCreated,
+            Self::WorkExecutionStateChanged(_) => EventType::WorkExecutionStateChanged,
+            Self::WorkExecutionTaskFileChanged(_) => EventType::WorkExecutionTaskFileChanged,
+            Self::AgentSessionCreated(_) => EventType::AgentSessionCreated,
+            Self::AgentSessionAttached(_) => EventType::AgentSessionAttached,
+            Self::AgentSessionPrompted(_) => EventType::AgentSessionPrompted,
+            Self::AgentSessionHeartbeat(_) => EventType::AgentSessionHeartbeat,
+            Self::AgentSessionHung(_) => EventType::AgentSessionHung,
+            Self::AgentSessionStopped(_) => EventType::AgentSessionStopped,
+            Self::AgentLifecycleStop(_) => EventType::AgentLifecycleStop,
+            Self::WriteLeaseAcquired(_) => EventType::WriteLeaseAcquired,
+            Self::WriteLeaseReleased(_) => EventType::WriteLeaseReleased,
+            Self::WriteLeaseStale(_) => EventType::WriteLeaseStale,
+            Self::WriteLeaseRevoked(_) => EventType::WriteLeaseRevoked,
+            Self::PrOpened(_) => EventType::PrOpened,
+            Self::PrHeadUpdated(_) => EventType::PrHeadUpdated,
+            Self::GhReviewHookStarted(_) => EventType::GhReviewHookStarted,
+            Self::GhReviewHookCompleted(_) => EventType::GhReviewHookCompleted,
+            Self::MergeLockAcquired(_) => EventType::MergeLockAcquired,
+            Self::MergeStarted(_) => EventType::MergeStarted,
+            Self::MergeCompleted(_) => EventType::MergeCompleted,
+            Self::MergeFailed(_) => EventType::MergeFailed,
+            Self::CanonicalSyncCompleted(_) => EventType::CanonicalSyncCompleted,
+            Self::CanonicalSyncFailed(_) => EventType::CanonicalSyncFailed,
+            Self::CleanupStarted(_) => EventType::CleanupStarted,
+            Self::CleanupCompleted(_) => EventType::CleanupCompleted,
+            Self::UserIntervention(_) => EventType::UserIntervention,
+            Self::WorktreeCreated(_) => EventType::WorktreeCreated,
+            Self::BranchCreated(_) => EventType::BranchCreated,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -352,5 +428,26 @@ mod tests {
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("\"event_type\":\"work_execution_state_changed\""));
         assert!(json.contains("\"payload\""));
+    }
+
+    #[test]
+    fn event_type_serializes_as_snake_case() {
+        let json = serde_json::to_string(&EventType::GhReviewHookCompleted).unwrap();
+        assert_eq!(json, "\"gh_review_hook_completed\"");
+
+        let back: EventType = serde_json::from_str("\"worktree_created\"").unwrap();
+        assert_eq!(back, EventType::WorktreeCreated);
+    }
+
+    #[test]
+    fn event_data_exposes_event_type() {
+        let data = EventData::MergeFailed(MergeFailedPayload {
+            merge_lock_id: "01JTEST00000000000000000003".into(),
+            work_execution_id: "01JTEST00000000000000000002".into(),
+            pr_number: 12,
+            reason: "conflict".into(),
+        });
+
+        assert_eq!(data.event_type(), EventType::MergeFailed);
     }
 }
