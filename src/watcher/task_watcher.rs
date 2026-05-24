@@ -78,9 +78,10 @@ fn notify_orchestrator_task_file_changed(
              ORDER BY started_at DESC
              LIMIT 1",
             rusqlite::params![project_id],
-            |row| row.get(0),
+            |row| row.get::<_, Option<String>>(0),
         )
-        .optional()?;
+        .optional()?
+        .flatten();
 
     let Some(cmux_tab_id) = cmux_tab_id else {
         return Ok(false);
@@ -444,6 +445,43 @@ mod tests {
             &conn,
             &cmux,
             "01JTEST00000000000000000001",
+            "01JTEST00000000000000000003",
+            TaskFileChangePriority::Normal,
+        )
+        .unwrap();
+
+        assert!(!notified);
+        assert!(cmux.notifications.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn null_orchestrator_tab_id_is_not_an_error() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let project_id = "01JTEST00000000000000000001";
+        conn.execute_batch(
+            "CREATE TABLE agent_sessions (
+                agent_session_id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                state TEXT NOT NULL,
+                role TEXT NOT NULL,
+                cmux_tab_id TEXT,
+                started_at TEXT NOT NULL
+             );",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO agent_sessions (
+                agent_session_id, project_id, state, role, cmux_tab_id, started_at
+             ) VALUES ('01JTEST00000000000000000002', ?1, 'running', 'orchestrator', NULL, '2026-05-24T00:00:01Z')",
+            rusqlite::params![project_id],
+        )
+        .unwrap();
+        let cmux = SpyCmuxAdapter::new();
+
+        let notified = notify_orchestrator_task_file_changed(
+            &conn,
+            &cmux,
+            project_id,
             "01JTEST00000000000000000003",
             TaskFileChangePriority::Normal,
         )
