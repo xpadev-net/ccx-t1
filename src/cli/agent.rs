@@ -197,8 +197,9 @@ fn resolve_attach_work_execution(
         if !project_dir.join("state.sqlite").exists() {
             continue;
         }
-        if let Some(found) = query_attach_work_execution(project_dir, work_execution_id)? {
-            return Ok(found);
+        match query_attach_work_execution(project_dir, work_execution_id) {
+            Ok(Some(found)) => return Ok(found),
+            Ok(None) | Err(_) => continue,
         }
     }
 
