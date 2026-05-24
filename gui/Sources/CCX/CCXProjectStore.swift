@@ -302,17 +302,50 @@ extension CCXProjectStore {
             return sqlite3_column_int64(stmt, idx)
         }
 
-        /// Tail the JSONL log and decode the most recent N entries. The audit
-        /// log can grow large, so we cap by line count rather than memory size.
+        /// Tail the JSONL log and decode the most recent N entries.
+        /// `events.jsonl` is append-only and can grow to hundreds of megabytes
+        /// in long-running projects; we walk backwards in 64 KiB chunks until
+        /// we have enough newlines to slice out the last N lines, so memory
+        /// stays bounded regardless of file size.
+        private static let recentEventLineLimit = 100
+        private static let tailReadChunkSize = 64 * 1024
+
         private static func loadRecentEvents(at url: URL) -> [CCXEventEntry] {
             guard let handle = try? FileHandle(forReadingFrom: url) else {
                 return []
             }
             defer { try? handle.close() }
-            guard let data = try? handle.readToEnd(), let text = String(data: data, encoding: .utf8) else {
+
+            var fileLength: UInt64 = 0
+            do {
+                fileLength = try handle.seekToEnd()
+            } catch {
                 return []
             }
-            let lines = text.split(separator: "\n").suffix(100)
+            if fileLength == 0 { return [] }
+
+            var buffer = Data()
+            var offset = fileLength
+            var newlineCount = 0
+            let targetNewlines = recentEventLineLimit + 1  // need one extra to bound the first line
+
+            while offset > 0 && newlineCount < targetNewlines {
+                let chunk = UInt64(tailReadChunkSize)
+                let readLen = min(chunk, offset)
+                let newOffset = offset - readLen
+                do {
+                    try handle.seek(toOffset: newOffset)
+                } catch {
+                    break
+                }
+                let part = (try? handle.read(upToCount: Int(readLen))) ?? Data()
+                buffer = part + buffer
+                offset = newOffset
+                newlineCount = buffer.reduce(0) { $0 + ($1 == 0x0A ? 1 : 0) }
+            }
+
+            guard let text = String(data: buffer, encoding: .utf8) else { return [] }
+            let lines = text.split(separator: "\n", omittingEmptySubsequences: true).suffix(recentEventLineLimit)
             var entries: [CCXEventEntry] = []
             entries.reserveCapacity(lines.count)
             for line in lines {

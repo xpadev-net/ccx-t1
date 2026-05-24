@@ -40,20 +40,22 @@ xcodebuild -project gui/cmux.xcodeproj -list   # needs the ghostty submodule
 
 The `PanelType.ccxDashboard` case (added in `Sources/Panels/Panel.swift`) is
 rendered by `Sources/Panels/PanelContentView.swift` via `CCXDashboardPanelView`.
-To open a dashboard programmatically, construct a panel and hand it to the
-workspace's panel-creation flow:
+To open a dashboard programmatically, parse the launch arguments and only
+construct a panel when a project id was actually supplied:
 
 ```swift
-let panel = CCXDashboardPanel(projectId: launchArgs.projectId!)
+let launchArgs = CCXLaunchArguments.parse()
+guard let projectId = launchArgs.projectId else { return }
+let panel = CCXDashboardPanel(projectId: projectId)
 workspace.adopt(panel: panel)  // existing cmux helper
 ```
 
 `CCXLaunchArguments.parse()` reads `--project-id <id>` from
 `CommandLine.arguments`, which is what `ccx project open` passes via
-`open -a <bundle> --args --project-id <id>`. Calling
-`presentDashboardIfRequested()` from `AppDelegate.applicationDidFinishLaunching`
-is the recommended hook point; this single-line wiring is the remaining
-manual step and is tracked separately from the file-level wiring above.
+`open -a <bundle> --args --project-id <id>`. Calling the snippet above from
+`AppDelegate.applicationDidFinishLaunching` is the recommended hook point;
+this single-line wiring is the remaining manual step and is tracked
+separately from the file-level wiring above.
 
 ## Data flow
 

@@ -42,6 +42,11 @@ public final class CCXDashboardPanel: Panel, ObservableObject {
 
     public var displayIcon: String? { "rectangle.3.group" }
 
+    deinit {
+        storeChangeCancellable?.cancel()
+        storeChangeCancellable = nil
+    }
+
     public func close() {
         // CCXProjectStore tears down its FSEventStream in deinit.
     }
