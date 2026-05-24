@@ -423,11 +423,9 @@ fn kill_child(child: &Arc<Mutex<Child>>) {
         Ok(Some(_)) => {}
         Ok(None) => {
             let _ = child.kill();
-            let _ = child.wait();
         }
         Err(_) => {
             let _ = child.kill();
-            let _ = child.wait();
         }
     }
 }
@@ -538,6 +536,33 @@ impl CliFallbackCmuxAdapter {
         *mode = next_mode;
         self.mode_ready.notify_all();
     }
+
+    fn establishing_guard(&self) -> EstablishingGuard<'_> {
+        EstablishingGuard {
+            adapter: self,
+            active: true,
+        }
+    }
+}
+
+struct EstablishingGuard<'a> {
+    adapter: &'a CliFallbackCmuxAdapter,
+    active: bool,
+}
+
+impl EstablishingGuard<'_> {
+    fn finish(mut self, next_mode: CliFallbackMode) {
+        self.adapter.finish_establishing(next_mode);
+        self.active = false;
+    }
+}
+
+impl Drop for EstablishingGuard<'_> {
+    fn drop(&mut self) {
+        if self.active {
+            self.adapter.finish_establishing(CliFallbackMode::Headless);
+        }
+    }
 }
 
 impl CmuxAdapter for CliFallbackCmuxAdapter {
@@ -557,17 +582,18 @@ impl CmuxAdapter for CliFallbackCmuxAdapter {
                     .ensure_workspace(project_id, display_slug, canonical_repo)
             }
             CliFallbackCallMode::Establishing => {
+                let guard = self.establishing_guard();
                 match self
                     .cli
                     .ensure_workspace(project_id, display_slug, canonical_repo)
                 {
                     Ok(id) => {
-                        self.finish_establishing(CliFallbackMode::Cli);
+                        guard.finish(CliFallbackMode::Cli);
                         Ok(id)
                     }
                     Err(e) => {
                         warn!("cmux CLI workspace fallback failed, running headless: {e}");
-                        self.finish_establishing(CliFallbackMode::Headless);
+                        guard.finish(CliFallbackMode::Headless);
                         self.headless
                             .ensure_workspace(project_id, display_slug, canonical_repo)
                     }
@@ -580,17 +606,20 @@ impl CmuxAdapter for CliFallbackCmuxAdapter {
         match self.begin_call() {
             CliFallbackCallMode::Headless => self.headless.create_agent_tab(spec),
             CliFallbackCallMode::Cli => self.cli.create_agent_tab(spec),
-            CliFallbackCallMode::Establishing => match self.cli.create_agent_tab(spec) {
-                Ok(id) => {
-                    self.finish_establishing(CliFallbackMode::Cli);
-                    Ok(id)
+            CliFallbackCallMode::Establishing => {
+                let guard = self.establishing_guard();
+                match self.cli.create_agent_tab(spec) {
+                    Ok(id) => {
+                        guard.finish(CliFallbackMode::Cli);
+                        Ok(id)
+                    }
+                    Err(e) => {
+                        warn!("cmux CLI tab fallback failed, running headless: {e}");
+                        guard.finish(CliFallbackMode::Headless);
+                        self.headless.create_agent_tab(spec)
+                    }
                 }
-                Err(e) => {
-                    warn!("cmux CLI tab fallback failed, running headless: {e}");
-                    self.finish_establishing(CliFallbackMode::Headless);
-                    self.headless.create_agent_tab(spec)
-                }
-            },
+            }
         }
     }
 
@@ -598,17 +627,20 @@ impl CmuxAdapter for CliFallbackCmuxAdapter {
         match self.begin_call() {
             CliFallbackCallMode::Headless => self.headless.close_tab(tab_id),
             CliFallbackCallMode::Cli => self.cli.close_tab(tab_id),
-            CliFallbackCallMode::Establishing => match self.cli.close_tab(tab_id) {
-                Ok(()) => {
-                    self.finish_establishing(CliFallbackMode::Cli);
-                    Ok(())
+            CliFallbackCallMode::Establishing => {
+                let guard = self.establishing_guard();
+                match self.cli.close_tab(tab_id) {
+                    Ok(()) => {
+                        guard.finish(CliFallbackMode::Cli);
+                        Ok(())
+                    }
+                    Err(e) => {
+                        warn!("cmux CLI close fallback failed, running headless: {e}");
+                        guard.finish(CliFallbackMode::Headless);
+                        self.headless.close_tab(tab_id)
+                    }
                 }
-                Err(e) => {
-                    warn!("cmux CLI close fallback failed, running headless: {e}");
-                    self.finish_establishing(CliFallbackMode::Headless);
-                    self.headless.close_tab(tab_id)
-                }
-            },
+            }
         }
     }
 
@@ -616,18 +648,20 @@ impl CmuxAdapter for CliFallbackCmuxAdapter {
         match self.begin_call() {
             CliFallbackCallMode::Headless => self.headless.notify_user(tab_id, message, level),
             CliFallbackCallMode::Cli => self.cli.notify_user(tab_id, message, level),
-            CliFallbackCallMode::Establishing => match self.cli.notify_user(tab_id, message, level)
-            {
-                Ok(()) => {
-                    self.finish_establishing(CliFallbackMode::Cli);
-                    Ok(())
+            CliFallbackCallMode::Establishing => {
+                let guard = self.establishing_guard();
+                match self.cli.notify_user(tab_id, message, level) {
+                    Ok(()) => {
+                        guard.finish(CliFallbackMode::Cli);
+                        Ok(())
+                    }
+                    Err(e) => {
+                        warn!("cmux CLI notify fallback failed, running headless: {e}");
+                        guard.finish(CliFallbackMode::Headless);
+                        self.headless.notify_user(tab_id, message, level)
+                    }
                 }
-                Err(e) => {
-                    warn!("cmux CLI notify fallback failed, running headless: {e}");
-                    self.finish_establishing(CliFallbackMode::Headless);
-                    self.headless.notify_user(tab_id, message, level)
-                }
-            },
+            }
         }
     }
 }
