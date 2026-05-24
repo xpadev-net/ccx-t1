@@ -279,7 +279,10 @@ impl CliCmuxAdapter {
         let timed_out = Arc::new(AtomicBool::new(false));
         let timed_out_for_thread = Arc::clone(&timed_out);
         std::thread::spawn(move || {
-            if done_rx.recv_timeout(RPC_IO_TIMEOUT).is_err() {
+            if matches!(
+                done_rx.recv_timeout(RPC_IO_TIMEOUT),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            ) {
                 timed_out_for_thread.store(true, Ordering::SeqCst);
                 let _ = Command::new("kill")
                     .arg("-KILL")
