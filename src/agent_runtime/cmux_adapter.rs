@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
+use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::sync::{mpsc, Arc, Mutex};
@@ -353,19 +354,27 @@ enum CliProcessEvent {
 }
 
 fn spawn_waiter(child: Arc<Mutex<Child>>, event_tx: mpsc::Sender<CliProcessEvent>) {
-    std::thread::spawn(move || loop {
-        let result = {
-            let mut child = child.lock().unwrap_or_else(|e| e.into_inner());
-            child.try_wait()
-        };
-        match result {
-            Ok(Some(status)) => {
-                let _ = event_tx.send(CliProcessEvent::Exited(Ok(status)));
+    let pid = {
+        let child = child.lock().unwrap_or_else(|e| e.into_inner());
+        child.id() as libc::pid_t
+    };
+
+    std::thread::spawn(move || {
+        let mut raw_status = 0;
+        loop {
+            let wait_result = unsafe { libc::waitpid(pid, &mut raw_status, 0) };
+            if wait_result == pid {
+                let _ = event_tx.send(CliProcessEvent::Exited(Ok(ExitStatus::from_raw(
+                    raw_status,
+                ))));
                 break;
             }
-            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
-            Err(e) => {
-                let _ = event_tx.send(CliProcessEvent::Exited(Err(e)));
+            if wait_result == -1 {
+                let err = std::io::Error::last_os_error();
+                if err.kind() == std::io::ErrorKind::Interrupted {
+                    continue;
+                }
+                let _ = event_tx.send(CliProcessEvent::Exited(Err(err)));
                 break;
             }
         }
