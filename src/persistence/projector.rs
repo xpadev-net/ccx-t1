@@ -153,8 +153,9 @@ fn apply_event_data(tx: &rusqlite::Transaction<'_>, event: &Event) -> Result<(),
 
         EventData::WorkExecutionTaskFileChanged(p) => {
             let n = if let Some(state) = p
-                .new_status
-                .as_deref()
+                .status_changed
+                .then(|| p.new_status.as_deref())
+                .flatten()
                 .and_then(task_status_to_work_execution_state)
             {
                 tx.execute(
@@ -571,6 +572,60 @@ mod tests {
             .unwrap();
         assert_eq!(hash, "task-hash-3");
         assert_eq!(state, "created");
+    }
+
+    #[test]
+    fn task_file_changed_with_unchanged_status_leaves_state_unchanged() {
+        use crate::domain::event::WorkExecutionStateChangedPayload;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = camino::Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
+        let mut conn = open_db(&dir).unwrap();
+        let project_id = "01JTEST00000000000000000001";
+        let work_execution_id = "01JTEST00000000000000000002";
+
+        project_event(&mut conn, &project_registered(project_id)).unwrap();
+        project_event(
+            &mut conn,
+            &work_execution_created(project_id, work_execution_id),
+        )
+        .unwrap();
+        project_event(
+            &mut conn,
+            &Event::new(
+                project_id,
+                Actor::Controller,
+                EventData::WorkExecutionStateChanged(WorkExecutionStateChangedPayload {
+                    work_execution_id: work_execution_id.into(),
+                    from: WorkExecutionState::Created,
+                    to: WorkExecutionState::PrOpen,
+                }),
+            ),
+        )
+        .unwrap();
+
+        let changed = Event::new(
+            project_id,
+            Actor::System,
+            EventData::WorkExecutionTaskFileChanged(WorkExecutionTaskFileChangedPayload {
+                work_execution_id: work_execution_id.into(),
+                new_hash: "task-hash-4".into(),
+                new_status: Some("working".into()),
+                status_changed: false,
+                notification_priority: Default::default(),
+            }),
+        );
+        project_event(&mut conn, &changed).unwrap();
+
+        let (hash, state): (String, String) = conn
+            .query_row(
+                "SELECT source_file_hash, state FROM work_executions WHERE work_execution_id = ?1",
+                params![work_execution_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(hash, "task-hash-4");
+        assert_eq!(state, "pr_open");
     }
 
     #[test]
