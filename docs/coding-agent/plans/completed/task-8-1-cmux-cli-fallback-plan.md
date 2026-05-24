@@ -46,6 +46,7 @@ Research waived: existing `cmux_adapter.rs` and `gui/CLI/cmux.swift` confirm `cm
 - 2026-05-25: Harness reviewer returned APPROVED with no findings.
 - 2026-05-25: Addressed `gh-review-hook` findings by adding a CLI subprocess timeout, avoiding headless success after CLI state is established, and replacing the fragile `help rpc` probe with `--version`.
 - 2026-05-25: Addressed follow-up `gh-review-hook` findings by serializing fallback mode transitions under one lock and replacing timeout polling with a deadline helper thread.
+- 2026-05-25: Addressed final timeout/probe follow-up by making CLI availability a non-executing executable check and only treating SIGKILL from the timeout path as a timeout.
 
 ## Decision Log
 

@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
+use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -292,7 +294,7 @@ impl CliCmuxAdapter {
         let output = child.wait_with_output().map_err(CcxError::from)?;
         let _ = done_tx.send(());
 
-        if timed_out.load(Ordering::SeqCst) {
+        if timed_out.load(Ordering::SeqCst) && output.status.signal() == Some(9) {
             return Err(CcxError::Other(anyhow::anyhow!(
                 "cmux CLI rpc {method} timed out after {:?}",
                 RPC_IO_TIMEOUT
@@ -542,13 +544,26 @@ fn cmux_cli_path() -> PathBuf {
 }
 
 fn cmux_cli_available(cli_path: &Path) -> bool {
-    Command::new(cli_path)
-        .arg("--version")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|status| status.success())
+    resolve_executable(cli_path)
+        .as_deref()
+        .map(is_executable_file)
+        .unwrap_or(false)
+}
+
+fn resolve_executable(cli_path: &Path) -> Option<PathBuf> {
+    if cli_path.is_absolute() || cli_path.components().count() > 1 {
+        return Some(cli_path.to_path_buf());
+    }
+
+    let path_var = std::env::var_os("PATH")?;
+    std::env::split_paths(&path_var)
+        .map(|dir| dir.join(cli_path))
+        .find(|candidate| is_executable_file(candidate))
+}
+
+fn is_executable_file(path: &Path) -> bool {
+    std::fs::metadata(path)
+        .map(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
         .unwrap_or(false)
 }
 
