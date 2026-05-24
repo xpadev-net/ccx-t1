@@ -15,9 +15,21 @@ public final class CCXDashboardPanel: Panel, ObservableObject {
     @Published public private(set) var focusFlashToken: Int = 0
     @Published public private(set) var titleOverride: String?
 
+    private var storeChangeCancellable: AnyCancellable?
+
     public init(projectId: String, ccxHome: URL? = nil) {
         self.id = UUID()
         self.store = CCXProjectStore(projectId: projectId, ccxHome: ccxHome)
+        // `displayTitle` reads through to `store.project?.displaySlug`. Without
+        // forwarding the store's change publisher, SwiftUI views observing
+        // this panel never re-evaluate the title after the project config
+        // loads asynchronously, so the tab gets stuck on the "CCX" fallback.
+        let panelObjectWillChange = self.objectWillChange
+        self.storeChangeCancellable = store.objectWillChange.sink { _ in
+            Task { @MainActor in
+                panelObjectWillChange.send()
+            }
+        }
     }
 
     public var displayTitle: String {
