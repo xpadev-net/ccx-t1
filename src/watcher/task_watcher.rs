@@ -1,7 +1,9 @@
 use camino::Utf8PathBuf;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 
-use crate::domain::event::{Actor, Event, EventData, WorkExecutionTaskFileChangedPayload};
+use crate::domain::event::{
+    Actor, Event, EventData, TaskFileChangePriority, WorkExecutionTaskFileChangedPayload,
+};
 use crate::error::CcxError;
 use crate::watcher::front_matter::parse_front_matter;
 use crate::watcher::sha256_hex;
@@ -9,6 +11,7 @@ use crate::watcher::sha256_hex;
 /// Per-execution deduplication state for the task watcher.
 pub struct TaskWatcherState {
     pub last_seen_hash: Option<String>,
+    pub last_seen_status: Option<String>,
 }
 
 /// Pure observe step: hash the content, deduplicate, parse front matter best-effort.
@@ -26,10 +29,19 @@ pub fn observe(
     }
     state.last_seen_hash = Some(hash.clone());
     let new_status = parse_front_matter(content).ok().and_then(|fm| fm.status);
+    let status_changed = new_status != state.last_seen_status;
+    let notification_priority = if status_changed {
+        TaskFileChangePriority::Normal
+    } else {
+        TaskFileChangePriority::Low
+    };
+    state.last_seen_status.clone_from(&new_status);
     Some(WorkExecutionTaskFileChangedPayload {
         work_execution_id: work_execution_id.to_string(),
         new_hash: hash,
         new_status,
+        status_changed,
+        notification_priority,
     })
 }
 
@@ -50,6 +62,7 @@ impl TaskWatcher {
     ) -> Result<Self, CcxError> {
         let mut state = TaskWatcherState {
             last_seen_hash: None,
+            last_seen_status: None,
         };
         let file = task_file.as_std_path().to_owned();
 
@@ -99,6 +112,7 @@ mod tests {
     fn state() -> TaskWatcherState {
         TaskWatcherState {
             last_seen_hash: None,
+            last_seen_status: None,
         }
     }
 
@@ -135,6 +149,32 @@ mod tests {
         let content = "---\nstatus: pr_open\n---\n# task\n";
         let payload = observe(content, "we-1", &mut s).unwrap();
         assert_eq!(payload.new_status.as_deref(), Some("pr_open"));
+        assert!(payload.status_changed);
+        assert_eq!(
+            payload.notification_priority,
+            TaskFileChangePriority::Normal
+        );
+    }
+
+    #[test]
+    fn unchanged_status_lowers_notification_priority() {
+        let mut s = state();
+        observe("---\nstatus: working\n---\n# original\n", "we-1", &mut s);
+        let payload = observe("---\nstatus: working\n---\n# modified\n", "we-1", &mut s).unwrap();
+        assert!(!payload.status_changed);
+        assert_eq!(payload.notification_priority, TaskFileChangePriority::Low);
+    }
+
+    #[test]
+    fn changed_status_uses_normal_notification_priority() {
+        let mut s = state();
+        observe("---\nstatus: assigned\n---\n# original\n", "we-1", &mut s);
+        let payload = observe("---\nstatus: working\n---\n# modified\n", "we-1", &mut s).unwrap();
+        assert!(payload.status_changed);
+        assert_eq!(
+            payload.notification_priority,
+            TaskFileChangePriority::Normal
+        );
     }
 
     #[test]
