@@ -51,7 +51,7 @@ class CmuxPerfRunner:
         self.debug_log_path = pathlib.Path(f"/tmp/cmux-debug-{self.tag_slug}.log")
         self.stdout_path = pathlib.Path(f"/tmp/cmux-perf-{self.tag_slug}-stdout.log")
         self.app_path = pathlib.Path(args.app_path).expanduser() if args.app_path else self.default_app_path()
-        self.binary_path = self.app_path / "Contents/MacOS/cmux DEV"
+        self.binary_path = self.app_path / "Contents/MacOS/ccx-cmux DEV"
         self.cli_path = self.app_path / "Contents/Resources/bin/cmux"
         self.fixture_root = self.make_fixture_root(args.fixture_root)
         self.proc: subprocess.Popen | None = None
@@ -77,7 +77,7 @@ class CmuxPerfRunner:
     def default_app_path(self) -> pathlib.Path:
         return pathlib.Path.home() / (
             f"Library/Developer/Xcode/DerivedData/cmux-{self.tag_slug}/"
-            f"Build/Products/Debug/cmux DEV {self.tag_slug}.app"
+            f"Build/Products/Debug/ccx-cmux DEV {self.tag_slug}.app"
         )
 
     def check_paths(self) -> None:
@@ -88,7 +88,7 @@ class CmuxPerfRunner:
 
     def clean_persisted_state(self) -> None:
         app_support = pathlib.Path.home() / "Library/Application Support/cmux"
-        bundle_id = f"com.cmuxterm.app.debug.{self.tag_id}"
+        bundle_id = f"com.cmuxterm.ccx-cmux.debug.{self.tag_id}"
         for suffix in ("", "-previous"):
             (app_support / f"session-{bundle_id}{suffix}.json").unlink(missing_ok=True)
         self.socket_path.unlink(missing_ok=True)
@@ -133,7 +133,7 @@ class CmuxPerfRunner:
                 "CMUXD_UNIX_PATH": str(self.cmuxd_socket_path),
                 "CMUX_DEBUG_LOG": str(self.debug_log_path),
                 "CMUX_TAG": self.tag,
-                "CMUX_BUNDLE_ID": f"com.cmuxterm.app.debug.{self.tag_id}",
+                "CMUX_BUNDLE_ID": f"com.cmuxterm.ccx-cmux.debug.{self.tag_id}",
             }
         )
         return env
@@ -143,7 +143,7 @@ class CmuxPerfRunner:
         env["CMUX_SOCKET"] = str(self.socket_path)
         env["CMUX_SOCKET_PATH"] = str(self.socket_path)
         env["CMUX_TAG"] = self.tag
-        env["CMUX_BUNDLE_ID"] = f"com.cmuxterm.app.debug.{self.tag_id}"
+        env["CMUX_BUNDLE_ID"] = f"com.cmuxterm.ccx-cmux.debug.{self.tag_id}"
         env["CMUXTERM_CLI_RESPONSE_TIMEOUT_SEC"] = str(max(15, int(self.args.snapshot_timeout)))
         return env
 
@@ -194,7 +194,7 @@ class CmuxPerfRunner:
                 except subprocess.TimeoutExpired:
                     pass
         subprocess.run(
-            ["pkill", "-f", re.escape(f"cmux DEV {self.tag_slug}.app/Contents/MacOS/cmux DEV")],
+            ["pkill", "-f", re.escape(f"ccx-cmux DEV {self.tag_slug}.app/Contents/MacOS/ccx-cmux DEV")],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,

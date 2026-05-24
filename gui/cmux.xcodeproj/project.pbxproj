@@ -267,6 +267,7 @@
 		CCC00000000000000000B004 /* CCXDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F004 /* CCXDashboardView.swift */; };
 		CCC00000000000000000B005 /* CCXSidebarPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F005 /* CCXSidebarPanel.swift */; };
 		CCC00000000000000000B006 /* CCXDashboardPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F006 /* CCXDashboardPanel.swift */; };
+		CCC00000000000000000B007 /* CCXAppDelegateBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F007 /* CCXAppDelegateBridge.swift */; };
 		A50012F3 /* KeyboardShortcutSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50012F2 /* KeyboardShortcutSettings.swift */; };
 		C0DE7B100000000000000001 /* TextBoxInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE7B100000000000000002 /* TextBoxInput.swift */; };
 		C1713004C1713004C1713004 /* KeyboardShortcutSettingsLookup.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1713003C1713003C1713003 /* KeyboardShortcutSettingsLookup.swift */; };
@@ -843,6 +844,7 @@
 		CCC00000000000000000F004 /* CCXDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXDashboardView.swift; sourceTree = "<group>"; };
 		CCC00000000000000000F005 /* CCXSidebarPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXSidebarPanel.swift; sourceTree = "<group>"; };
 		CCC00000000000000000F006 /* CCXDashboardPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXDashboardPanel.swift; sourceTree = "<group>"; };
+		CCC00000000000000000F007 /* CCXAppDelegateBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXAppDelegateBridge.swift; sourceTree = "<group>"; };
 		A50012F2 /* KeyboardShortcutSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardShortcutSettings.swift; sourceTree = "<group>"; };
 		C0DE7B100000000000000002 /* TextBoxInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextBoxInput.swift; sourceTree = "<group>"; };
 		C1713003C1713003C1713003 /* KeyboardShortcutSettingsLookup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardShortcutSettingsLookup.swift; sourceTree = "<group>"; };
@@ -1173,6 +1175,7 @@
 				CCC00000000000000000F004 /* CCXDashboardView.swift */,
 				CCC00000000000000000F005 /* CCXSidebarPanel.swift */,
 				CCC00000000000000000F006 /* CCXDashboardPanel.swift */,
+				CCC00000000000000000F007 /* CCXAppDelegateBridge.swift */,
 			);
 			name = CCX;
 			path = CCX;
@@ -2079,6 +2082,7 @@
 					CCC00000000000000000B004 /* CCXDashboardView.swift in Sources */,
 					CCC00000000000000000B005 /* CCXSidebarPanel.swift in Sources */,
 				CCC00000000000000000B006 /* CCXDashboardPanel.swift in Sources */,
+				CCC00000000000000000B007 /* CCXAppDelegateBridge.swift in Sources */,
 					A50012F3 /* KeyboardShortcutSettings.swift in Sources */,
 				C0DE7B100000000000000001 /* TextBoxInput.swift in Sources */,
 					C1713004C1713004C1713004 /* KeyboardShortcutSettingsLookup.swift in Sources */,
@@ -2652,8 +2656,8 @@
 					"-framework",
 					Carbon,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.cmuxterm.app.debug;
-				PRODUCT_NAME = "cmux DEV";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.cmuxterm.ccx-cmux.debug";
+				PRODUCT_NAME = "ccx-cmux DEV";
 				SPARKLE_PUBLIC_KEY = "avjcgKibf1FTvhIjLBxhd+0HSpsXU4D0IGlVk8cgqRc=";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OBJC_BRIDGING_HEADER = "cmux-Bridging-Header.h";
@@ -2693,8 +2697,8 @@
 					"-framework",
 					Carbon,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.cmuxterm.app;
-				PRODUCT_NAME = cmux;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.cmuxterm.ccx-cmux";
+				PRODUCT_NAME = "ccx-cmux";
 				SPARKLE_PUBLIC_KEY = "avjcgKibf1FTvhIjLBxhd+0HSpsXU4D0IGlVk8cgqRc=";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OBJC_BRIDGING_HEADER = "cmux-Bridging-Header.h";
@@ -2821,7 +2825,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/cmux DEV.app/Contents/MacOS/cmux DEV";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ccx-cmux DEV.app/Contents/MacOS/ccx-cmux DEV";
 				TEST_TARGET_NAME = cmux;
 			};
 			name = Debug;
@@ -2839,7 +2843,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.cmuxterm.apptests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/cmux.app/Contents/MacOS/cmux";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ccx-cmux.app/Contents/MacOS/ccx-cmux";
 				TEST_TARGET_NAME = cmux;
 			};
 			name = Release;
