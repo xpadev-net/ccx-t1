@@ -254,7 +254,13 @@ impl CliCmuxAdapter {
             )));
         }
 
-        Ok(response.get("result").cloned().unwrap_or(response))
+        if let Some(result) = response.get("result") {
+            return Ok(result.clone());
+        }
+        if response.get("jsonrpc").is_some() || response.get("id").is_some() {
+            return Ok(serde_json::Value::Null);
+        }
+        Ok(response)
     }
 
     fn run_rpc_process(&self, method: &str, params_json: String) -> Result<Output, CcxError> {
@@ -361,6 +367,8 @@ fn spawn_waiter(pid: libc::pid_t, event_tx: mpsc::Sender<CliProcessEvent>) {
     std::thread::spawn(move || {
         let mut raw_status = 0;
         loop {
+            // Keep process reaping out of the Child mutex so the timeout path
+            // can still acquire the Child handle and call Child::kill().
             let wait_result = unsafe { libc::waitpid(pid, &mut raw_status, 0) };
             if wait_result == pid {
                 let _ = event_tx.send(CliProcessEvent::Exited(Ok(ExitStatus::from_raw(
