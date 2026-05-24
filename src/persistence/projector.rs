@@ -2,6 +2,7 @@ use camino::Utf8Path;
 use rusqlite::{params, Connection};
 
 use crate::domain::event::{Event, EventData};
+use crate::domain::work_execution::WorkExecutionState;
 use crate::error::CcxError;
 use crate::persistence::sqlite::{mark_dirty, open_db};
 
@@ -70,6 +71,23 @@ fn require_affected(rows: usize, entity: &str, id: &str) -> Result<(), CcxError>
     }
 }
 
+fn task_status_to_work_execution_state(status: &str) -> Option<WorkExecutionState> {
+    match status {
+        "assigned" => Some(WorkExecutionState::TaskFileCreated),
+        "working" => Some(WorkExecutionState::Running),
+        "pr_open" => Some(WorkExecutionState::PrOpen),
+        "gate_check" => Some(WorkExecutionState::GateCheck),
+        "review_fixing" => Some(WorkExecutionState::ReviewFixing),
+        "merge_ready" => Some(WorkExecutionState::MergeReady),
+        "returned" => Some(WorkExecutionState::Returned),
+        "blocked" => Some(WorkExecutionState::Blocked),
+        "failed" => Some(WorkExecutionState::Failed),
+        "followup_required" => Some(WorkExecutionState::FollowupRequired),
+        "merged" => Some(WorkExecutionState::Merged),
+        _ => None,
+    }
+}
+
 fn apply_event_data(tx: &rusqlite::Transaction<'_>, event: &Event) -> Result<(), CcxError> {
     match &event.data {
         EventData::ProjectRegistered(p) => {
@@ -134,10 +152,23 @@ fn apply_event_data(tx: &rusqlite::Transaction<'_>, event: &Event) -> Result<(),
         }
 
         EventData::WorkExecutionTaskFileChanged(p) => {
-            let n = tx.execute(
-                "UPDATE work_executions SET source_file_hash = ?1 WHERE work_execution_id = ?2",
-                params![p.new_hash, p.work_execution_id],
-            )?;
+            let n = if let Some(state) = p
+                .status_changed
+                .then(|| p.new_status.as_deref())
+                .flatten()
+                .and_then(task_status_to_work_execution_state)
+            {
+                tx.execute(
+                    "UPDATE work_executions SET source_file_hash = ?1, state = ?2
+                     WHERE work_execution_id = ?3",
+                    params![p.new_hash, state.to_string(), p.work_execution_id],
+                )?
+            } else {
+                tx.execute(
+                    "UPDATE work_executions SET source_file_hash = ?1 WHERE work_execution_id = ?2",
+                    params![p.new_hash, p.work_execution_id],
+                )?
+            };
             require_affected(n, "work_execution", &p.work_execution_id)?;
         }
 
@@ -340,7 +371,10 @@ fn apply_event_data(tx: &rusqlite::Transaction<'_>, event: &Event) -> Result<(),
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::event::{Actor, Event, EventData, ProjectRegisteredPayload};
+    use crate::domain::event::{
+        Actor, Event, EventData, ProjectRegisteredPayload, WorkExecutionCreatedPayload,
+        WorkExecutionTaskFileChangedPayload,
+    };
     use crate::persistence::sqlite::open_db;
 
     fn project_registered(project_id: &str) -> Event {
@@ -351,6 +385,24 @@ mod tests {
                 display_slug: "test-repo".into(),
                 canonical_repo: "/tmp/repo".into(),
                 task_source_file: "/tmp/repo/tasks.md".into(),
+            }),
+        )
+    }
+
+    fn work_execution_created(project_id: &str, work_execution_id: &str) -> Event {
+        Event::new(
+            project_id,
+            Actor::Controller,
+            EventData::WorkExecutionCreated(WorkExecutionCreatedPayload {
+                work_execution_id: work_execution_id.into(),
+                branch_name: "ccx/test".into(),
+                worktree_path: "/tmp/worktree".into(),
+                task_file_path: "/tmp/task.md".into(),
+                source_path: "/tmp/repo/tasks.md".into(),
+                selector_type: "line".into(),
+                selector_value: "1".into(),
+                display_text: "test task".into(),
+                source_file_hash: "initial-hash".into(),
             }),
         )
     }
@@ -414,6 +466,166 @@ mod tests {
             )
             .unwrap();
         assert_eq!(last_id.as_deref(), Some(audit_event.event_id.as_str()));
+    }
+
+    #[test]
+    fn task_file_changed_updates_hash_and_state_from_status() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = camino::Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
+        let mut conn = open_db(&dir).unwrap();
+        let project_id = "01JTEST00000000000000000001";
+        let work_execution_id = "01JTEST00000000000000000002";
+
+        project_event(&mut conn, &project_registered(project_id)).unwrap();
+        project_event(
+            &mut conn,
+            &work_execution_created(project_id, work_execution_id),
+        )
+        .unwrap();
+
+        let changed = Event::new(
+            project_id,
+            Actor::System,
+            EventData::WorkExecutionTaskFileChanged(WorkExecutionTaskFileChangedPayload {
+                work_execution_id: work_execution_id.into(),
+                new_hash: "task-hash-2".into(),
+                new_status: Some("working".into()),
+                status_changed: true,
+                notification_priority: Default::default(),
+            }),
+        );
+        project_event(&mut conn, &changed).unwrap();
+
+        let (hash, state): (String, String) = conn
+            .query_row(
+                "SELECT source_file_hash, state FROM work_executions WHERE work_execution_id = ?1",
+                params![work_execution_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(hash, "task-hash-2");
+        assert_eq!(state, "running");
+    }
+
+    #[test]
+    fn all_allowed_task_status_values_map_to_work_execution_states() {
+        use crate::watcher::front_matter::ALLOWED_STATUS_VALUES;
+
+        let expected = [
+            ("assigned", WorkExecutionState::TaskFileCreated),
+            ("working", WorkExecutionState::Running),
+            ("pr_open", WorkExecutionState::PrOpen),
+            ("gate_check", WorkExecutionState::GateCheck),
+            ("review_fixing", WorkExecutionState::ReviewFixing),
+            ("merge_ready", WorkExecutionState::MergeReady),
+            ("returned", WorkExecutionState::Returned),
+            ("blocked", WorkExecutionState::Blocked),
+            ("failed", WorkExecutionState::Failed),
+            ("followup_required", WorkExecutionState::FollowupRequired),
+            ("merged", WorkExecutionState::Merged),
+        ];
+
+        assert_eq!(ALLOWED_STATUS_VALUES.len(), expected.len());
+        for (status, state) in expected {
+            assert!(
+                ALLOWED_STATUS_VALUES.contains(&status),
+                "front matter allow-list is missing status={status}"
+            );
+            assert_eq!(task_status_to_work_execution_state(status), Some(state));
+        }
+    }
+
+    #[test]
+    fn task_file_changed_without_status_leaves_state_unchanged() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = camino::Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
+        let mut conn = open_db(&dir).unwrap();
+        let project_id = "01JTEST00000000000000000001";
+        let work_execution_id = "01JTEST00000000000000000002";
+
+        project_event(&mut conn, &project_registered(project_id)).unwrap();
+        project_event(
+            &mut conn,
+            &work_execution_created(project_id, work_execution_id),
+        )
+        .unwrap();
+
+        let changed = Event::new(
+            project_id,
+            Actor::System,
+            EventData::WorkExecutionTaskFileChanged(WorkExecutionTaskFileChangedPayload {
+                work_execution_id: work_execution_id.into(),
+                new_hash: "task-hash-3".into(),
+                new_status: None,
+                status_changed: false,
+                notification_priority: Default::default(),
+            }),
+        );
+        project_event(&mut conn, &changed).unwrap();
+
+        let (hash, state): (String, String) = conn
+            .query_row(
+                "SELECT source_file_hash, state FROM work_executions WHERE work_execution_id = ?1",
+                params![work_execution_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(hash, "task-hash-3");
+        assert_eq!(state, "created");
+    }
+
+    #[test]
+    fn task_file_changed_with_unchanged_status_leaves_state_unchanged() {
+        use crate::domain::event::WorkExecutionStateChangedPayload;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = camino::Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
+        let mut conn = open_db(&dir).unwrap();
+        let project_id = "01JTEST00000000000000000001";
+        let work_execution_id = "01JTEST00000000000000000002";
+
+        project_event(&mut conn, &project_registered(project_id)).unwrap();
+        project_event(
+            &mut conn,
+            &work_execution_created(project_id, work_execution_id),
+        )
+        .unwrap();
+        project_event(
+            &mut conn,
+            &Event::new(
+                project_id,
+                Actor::Controller,
+                EventData::WorkExecutionStateChanged(WorkExecutionStateChangedPayload {
+                    work_execution_id: work_execution_id.into(),
+                    from: WorkExecutionState::Created,
+                    to: WorkExecutionState::PrOpen,
+                }),
+            ),
+        )
+        .unwrap();
+
+        let changed = Event::new(
+            project_id,
+            Actor::System,
+            EventData::WorkExecutionTaskFileChanged(WorkExecutionTaskFileChangedPayload {
+                work_execution_id: work_execution_id.into(),
+                new_hash: "task-hash-4".into(),
+                new_status: Some("working".into()),
+                status_changed: false,
+                notification_priority: Default::default(),
+            }),
+        );
+        project_event(&mut conn, &changed).unwrap();
+
+        let (hash, state): (String, String) = conn
+            .query_row(
+                "SELECT source_file_hash, state FROM work_executions WHERE work_execution_id = ?1",
+                params![work_execution_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(hash, "task-hash-4");
+        assert_eq!(state, "pr_open");
     }
 
     #[test]
