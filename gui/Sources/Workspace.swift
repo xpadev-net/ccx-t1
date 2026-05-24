@@ -13215,6 +13215,8 @@ final class Workspace: Identifiable, ObservableObject {
             isPinned: false,
             inPane: paneId
         ) else {
+            NSLog("ccx.dashboardOpen.createTab.failed panel=%@ title=%@ pane=%@",
+                  panel.id.uuidString, panel.displayTitle, paneId.id.uuidString)
 #if DEBUG
             cmuxDebugLog("ccx.dashboardOpen.createTab.failed panel=\(panel.id.uuidString.prefix(8)) title=\"\(panel.displayTitle)\" pane=\(paneId.id.uuidString.prefix(8)) kind=\(SurfaceKind.ccxDashboard)")
 #endif
