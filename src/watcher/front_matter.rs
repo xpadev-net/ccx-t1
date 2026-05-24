@@ -1,9 +1,40 @@
 use serde::Deserialize;
 
 /// Parsed YAML front matter from a task.md file.
-#[derive(Debug, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct TaskFrontMatter {
     pub status: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawTaskFrontMatter {
+    status: Option<serde_yaml::Value>,
+}
+
+const ALLOWED_STATUS_VALUES: &[&str] = &[
+    "assigned",
+    "working",
+    "pr_open",
+    "gate_check",
+    "review_fixing",
+    "merge_ready",
+    "returned",
+    "blocked",
+    "failed",
+    "followup_required",
+    "merged",
+];
+
+fn validate_status(value: Option<serde_yaml::Value>) -> Option<String> {
+    let serde_yaml::Value::String(status) = value? else {
+        return None;
+    };
+    let status = status.trim();
+    if ALLOWED_STATUS_VALUES.contains(&status) {
+        Some(status.to_string())
+    } else {
+        None
+    }
 }
 
 /// Extract and parse YAML front matter delimited by `---` markers.
@@ -46,7 +77,10 @@ pub fn parse_front_matter(content: &str) -> Result<TaskFrontMatter, serde_yaml::
             if yaml_content.trim().is_empty() {
                 return Ok(TaskFrontMatter::default());
             }
-            return serde_yaml::from_str(yaml_content);
+            let raw: RawTaskFrontMatter = serde_yaml::from_str(yaml_content)?;
+            return Ok(TaskFrontMatter {
+                status: validate_status(raw.status),
+            });
         }
     }
 
@@ -97,6 +131,34 @@ mod tests {
     }
 
     #[test]
+    fn unknown_status_is_ignored() {
+        let content = "---\nstatus: merging\n---\n";
+        let result = parse_front_matter(content).unwrap();
+        assert_eq!(result.status, None);
+    }
+
+    #[test]
+    fn non_string_status_is_ignored() {
+        let content = "---\nstatus:\n  - working\n---\n";
+        let result = parse_front_matter(content).unwrap();
+        assert_eq!(result.status, None);
+    }
+
+    #[test]
+    fn blank_status_is_ignored() {
+        let content = "---\nstatus: \"  \"\n---\n";
+        let result = parse_front_matter(content).unwrap();
+        assert_eq!(result.status, None);
+    }
+
+    #[test]
+    fn status_whitespace_is_trimmed() {
+        let content = "---\nstatus: \" working \"\n---\n";
+        let result = parse_front_matter(content).unwrap();
+        assert_eq!(result.status.as_deref(), Some("working"));
+    }
+
+    #[test]
     fn leading_blank_lines_are_ignored() {
         let content = "\n\n---\nstatus: pr_open\n---\n";
         let result = parse_front_matter(content).unwrap();
@@ -120,13 +182,14 @@ mod tests {
 
     #[test]
     fn all_known_status_values_round_trip() {
-        for status in [
-            "assigned", "working", "pr_open", "gate_check", "review_fixing",
-            "merge_ready", "returned", "blocked", "failed", "followup_required", "merged",
-        ] {
+        for status in ALLOWED_STATUS_VALUES {
             let content = format!("---\nstatus: {status}\n---\n");
             let result = parse_front_matter(&content).unwrap();
-            assert_eq!(result.status.as_deref(), Some(status), "failed for status={status}");
+            assert_eq!(
+                result.status.as_deref(),
+                Some(*status),
+                "failed for status={status}"
+            );
         }
     }
 }
