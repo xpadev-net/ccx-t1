@@ -581,6 +581,11 @@ extension Workspace {
             markdownSnapshot = nil
             filePreviewSnapshot = nil
             rightSidebarToolSnapshot = SessionRightSidebarToolPanelSnapshot(mode: toolPanel.mode)
+        case .ccxDashboard:
+            // CCX dashboard panels are stateless from cmux's persistence
+            // perspective — the controller owns the data; we don't capture a
+            // session snapshot for them.
+            return nil
         }
 
         return SessionPanelSnapshot(
@@ -1091,6 +1096,10 @@ extension Workspace {
             }
             applySessionPanelMetadata(snapshot, toPanelId: toolPanel.id)
             return toolPanel.id
+        case .ccxDashboard:
+            // CCX dashboards aren't restored from snapshots — they're launched
+            // explicitly by `ccx project open` with a `--project-id` argument.
+            return nil
         }
     }
 
@@ -9355,6 +9364,7 @@ final class Workspace: Identifiable, ObservableObject {
         static let markdown = "markdown"
         static let filePreview = "filePreview"
         static let rightSidebarTool = "rightSidebarTool"
+        static let ccxDashboard = "ccxDashboard"
     }
 
     enum PanelShellActivityState: String {
@@ -10232,6 +10242,8 @@ final class Workspace: Identifiable, ObservableObject {
             return SurfaceKind.filePreview
         case .rightSidebarTool:
             return SurfaceKind.rightSidebarTool
+        case .ccxDashboard:
+            return SurfaceKind.ccxDashboard
         }
     }
 

@@ -261,6 +261,12 @@
 		A5001270 /* PostHog in Frameworks */ = {isa = PBXBuildFile; productRef = A5001271 /* PostHog */; };
 		A5001290 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = A5001291 /* MarkdownUI */; };
 		A50012F1 /* Backport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50012F0 /* Backport.swift */; };
+		CCC00000000000000000B001 /* CCXModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F001 /* CCXModels.swift */; };
+		CCC00000000000000000B002 /* CCXProjectStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F002 /* CCXProjectStore.swift */; };
+		CCC00000000000000000B003 /* CCXLaunchArguments.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F003 /* CCXLaunchArguments.swift */; };
+		CCC00000000000000000B004 /* CCXDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F004 /* CCXDashboardView.swift */; };
+		CCC00000000000000000B005 /* CCXSidebarPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F005 /* CCXSidebarPanel.swift */; };
+		CCC00000000000000000B006 /* CCXDashboardPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F006 /* CCXDashboardPanel.swift */; };
 		A50012F3 /* KeyboardShortcutSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50012F2 /* KeyboardShortcutSettings.swift */; };
 		C0DE7B100000000000000001 /* TextBoxInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE7B100000000000000002 /* TextBoxInput.swift */; };
 		C1713004C1713004C1713004 /* KeyboardShortcutSettingsLookup.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1713003C1713003C1713003 /* KeyboardShortcutSettingsLookup.swift */; };
@@ -831,6 +837,12 @@
 		A5354302A5354302A5354302 /* SocketControlSettings+SocketPathMarkers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SocketControlSettings+SocketPathMarkers.swift"; sourceTree = "<group>"; };
 		A5001241 /* WindowDecorationsController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowDecorationsController.swift; sourceTree = "<group>"; };
 		A50012F0 /* Backport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Backport.swift; sourceTree = "<group>"; };
+		CCC00000000000000000F001 /* CCXModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXModels.swift; sourceTree = "<group>"; };
+		CCC00000000000000000F002 /* CCXProjectStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXProjectStore.swift; sourceTree = "<group>"; };
+		CCC00000000000000000F003 /* CCXLaunchArguments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXLaunchArguments.swift; sourceTree = "<group>"; };
+		CCC00000000000000000F004 /* CCXDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXDashboardView.swift; sourceTree = "<group>"; };
+		CCC00000000000000000F005 /* CCXSidebarPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXSidebarPanel.swift; sourceTree = "<group>"; };
+		CCC00000000000000000F006 /* CCXDashboardPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXDashboardPanel.swift; sourceTree = "<group>"; };
 		A50012F2 /* KeyboardShortcutSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardShortcutSettings.swift; sourceTree = "<group>"; };
 		C0DE7B100000000000000002 /* TextBoxInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextBoxInput.swift; sourceTree = "<group>"; };
 		C1713003C1713003C1713003 /* KeyboardShortcutSettingsLookup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardShortcutSettingsLookup.swift; sourceTree = "<group>"; };
@@ -1150,6 +1162,20 @@
 			);
 			name = Auth;
 			path = Auth;
+			sourceTree = "<group>";
+		};
+		CCC0000000000000000000F0 /* CCX */ = {
+			isa = PBXGroup;
+			children = (
+				CCC00000000000000000F001 /* CCXModels.swift */,
+				CCC00000000000000000F002 /* CCXProjectStore.swift */,
+				CCC00000000000000000F003 /* CCXLaunchArguments.swift */,
+				CCC00000000000000000F004 /* CCXDashboardView.swift */,
+				CCC00000000000000000F005 /* CCXSidebarPanel.swift */,
+				CCC00000000000000000F006 /* CCXDashboardPanel.swift */,
+			);
+			name = CCX;
+			path = CCX;
 			sourceTree = "<group>";
 		};
 		FEED0000000000000000F003 /* Feed */ = {
@@ -1510,6 +1536,7 @@
 				105D8421DF4E2E09D255D785 /* Auth */,
 				590E4F5F342E5B27010ECC8D /* Cloud */,
 				FEED0000000000000000F003 /* Feed */,
+			CCC0000000000000000000F0 /* CCX */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -2046,6 +2073,12 @@
 				E62155868BB29FEB5DAAAF25 /* SidebarSelectionState.swift in Sources */,
 					B9000018A1B2C3D4E5F60719 /* WindowDragHandleView.swift in Sources */,
 					A50012F1 /* Backport.swift in Sources */,
+					CCC00000000000000000B001 /* CCXModels.swift in Sources */,
+					CCC00000000000000000B002 /* CCXProjectStore.swift in Sources */,
+					CCC00000000000000000B003 /* CCXLaunchArguments.swift in Sources */,
+					CCC00000000000000000B004 /* CCXDashboardView.swift in Sources */,
+					CCC00000000000000000B005 /* CCXSidebarPanel.swift in Sources */,
+				CCC00000000000000000B006 /* CCXDashboardPanel.swift in Sources */,
 					A50012F3 /* KeyboardShortcutSettings.swift in Sources */,
 				C0DE7B100000000000000001 /* TextBoxInput.swift in Sources */,
 					C1713004C1713004C1713004 /* KeyboardShortcutSettingsLookup.swift in Sources */,

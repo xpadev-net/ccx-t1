@@ -23,17 +23,37 @@ to `$CCX_HOME/projects/<projectId>/` (default `~/.ccx/projects/<id>/`):
 
 ## Xcode wiring
 
-These files are not yet listed in `gui/cmux.xcodeproj/project.pbxproj`. To add
-them to the main app target:
+All files under `gui/Sources/CCX/` are now registered in
+`gui/cmux.xcodeproj/project.pbxproj` (PBXFileReference / PBXBuildFile /
+PBXGroup + main-app PBXSourcesBuildPhase entries). The `CCX` group lives
+underneath the existing `Sources` group with a `CCXxxxxxxxxxxxxxxxxxx`
+UUID prefix so it's easy to distinguish from the cmux upstream IDs.
 
-1. Open `gui/cmux.xcodeproj` in Xcode.
-2. Right-click the `Sources` group, choose **Add Files to "cmux"…**, select the
-   `Sources/CCX/` folder, and ensure the **ccx-cmux** target is checked.
-3. Confirm the new files appear under a `Sources/Build Phases/Compile Sources`
-   entry for that target.
-4. Build the **ccx-cmux** scheme (Debug). The dashboard view can be presented
-   from `AppDelegate` by constructing a `CCXProjectStore(projectId:)` driven
-   by `CCXLaunchArguments.parse()`.
+Verify the wiring after editing the pbxproj:
+
+```sh
+plutil -lint gui/cmux.xcodeproj/project.pbxproj
+xcodebuild -project gui/cmux.xcodeproj -list   # needs the ghostty submodule
+```
+
+## Hosting the dashboard
+
+The `PanelType.ccxDashboard` case (added in `Sources/Panels/Panel.swift`) is
+rendered by `Sources/Panels/PanelContentView.swift` via `CCXDashboardPanelView`.
+To open a dashboard programmatically, construct a panel and hand it to the
+workspace's panel-creation flow:
+
+```swift
+let panel = CCXDashboardPanel(projectId: launchArgs.projectId!)
+workspace.adopt(panel: panel)  // existing cmux helper
+```
+
+`CCXLaunchArguments.parse()` reads `--project-id <id>` from
+`CommandLine.arguments`, which is what `ccx project open` passes via
+`open -a <bundle> --args --project-id <id>`. Calling
+`presentDashboardIfRequested()` from `AppDelegate.applicationDidFinishLaunching`
+is the recommended hook point; this single-line wiring is the remaining
+manual step and is tracked separately from the file-level wiring above.
 
 ## Data flow
 

@@ -89,6 +89,10 @@ struct PanelContentView: View {
                     onRequestPanelFocus: onRequestPanelFocus
                 )
             }
+        case .ccxDashboard:
+            if let ccxPanel = panel as? CCXDashboardPanel {
+                CCXDashboardPanelView(panel: ccxPanel)
+            }
         }
     }
 
@@ -106,7 +110,7 @@ struct PanelContentView: View {
     private var shouldInstallPaneDropTarget: Bool {
         guard isVisibleInUI else { return false }
         switch panel.panelType {
-        case .markdown, .filePreview, .rightSidebarTool:
+        case .markdown, .filePreview, .rightSidebarTool, .ccxDashboard:
             return true
         case .terminal, .browser:
             return false
