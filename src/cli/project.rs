@@ -1,5 +1,6 @@
 use std::fs::{self, OpenOptions};
 use std::io::ErrorKind;
+use std::process::Command;
 
 use crate::config::project_config::{CleanupPolicy, GhReviewHook, ProjectConfig};
 use crate::config::{ccx_home, project_dir};
@@ -144,26 +145,91 @@ pub struct OpenArgs {
     pub json: bool,
 }
 
+/// Bundle name(s) `ccx project open` will try when launching the GUI.
+/// Ordered most-specific first: we prefer a CCX-branded bundle when one is
+/// installed, then fall back to the upstream cmux app names the fork currently
+/// ships under (`PRODUCT_NAME = cmux` / `cmux DEV` in
+/// `gui/cmux.xcodeproj/project.pbxproj`).
+const CCX_CMUX_BUNDLE_CANDIDATES: &[&str] = &["ccx-cmux", "ccx-cmux DEV", "cmux", "cmux DEV"];
+
 pub fn open(args: OpenArgs) -> Result<(), CcxError> {
     let dir = project_dir(&args.project_id)?;
     let config_path = dir.join("project.json");
     let raw = match fs::read_to_string(&config_path) {
         Ok(s) => s,
         Err(e) if e.kind() == ErrorKind::NotFound => {
-            return Err(CcxError::ProjectNotFound { project_id: args.project_id })
+            return Err(CcxError::ProjectNotFound {
+                project_id: args.project_id,
+            })
         }
         Err(e) => return Err(e.into()),
     };
     let config: ProjectConfig = serde_json::from_str(&raw)?;
     if args.json {
         println!("{}", serde_json::to_string_pretty(&config)?);
-    } else {
-        println!("Opening project: {} ({})", config.project_id, config.display_slug);
-        println!("canonical_repo: {}", config.canonical_repo);
-        println!("(ccx-cmux integration not yet implemented)");
+        return Ok(());
     }
-    Ok(())
+
+    println!(
+        "Opening project: {} ({})",
+        config.project_id, config.display_slug
+    );
+    println!("canonical_repo: {}", config.canonical_repo);
+
+    match locate_ccx_cmux_bundle() {
+        Some(name) => launch_ccx_cmux(&name, &config.project_id),
+        None => {
+            eprintln!();
+            eprintln!("ccx-cmux is not installed on this machine.");
+            eprintln!("Build it from the in-repo fork at gui/ — see gui/Sources/CCX/README.md");
+            eprintln!("for build steps. Once built, install the .app under /Applications");
+            eprintln!("(or any Launch Services–indexed location) and rerun this command.");
+            Ok(())
+        }
+    }
 }
+
+/// Returns the first ccx-cmux bundle name that Launch Services can resolve,
+/// or `None` if no candidate is installed. We probe with `mdfind` because it
+/// reflects Launch Services' indexed view; the same view `open -a` consults.
+fn locate_ccx_cmux_bundle() -> Option<String> {
+    for &name in CCX_CMUX_BUNDLE_CANDIDATES {
+        if launch_services_has_bundle(name) {
+            return Some(name.to_string());
+        }
+    }
+    None
+}
+
+fn launch_services_has_bundle(name: &str) -> bool {
+    let query = format!(
+        "kMDItemContentType == 'com.apple.application-bundle' && kMDItemFSName == '{}.app'",
+        name
+    );
+    let output = Command::new("mdfind").arg(query).output();
+    match output {
+        Ok(out) if out.status.success() => !out.stdout.is_empty(),
+        _ => false,
+    }
+}
+
+fn launch_ccx_cmux(bundle_name: &str, project_id: &str) -> Result<(), CcxError> {
+    let status = Command::new("open")
+        .arg("-a")
+        .arg(bundle_name)
+        .arg("--args")
+        .arg("--project-id")
+        .arg(project_id)
+        .status();
+    match status {
+        Ok(s) if s.success() => Ok(()),
+        Ok(s) => Err(CcxError::Other(anyhow::anyhow!(
+            "open -a {bundle_name} exited with status {s}"
+        ))),
+        Err(e) => Err(CcxError::Io(e)),
+    }
+}
+
 
 pub fn status(args: StatusArgs) -> Result<(), CcxError> {
     let dir = project_dir(&args.project_id)?;
