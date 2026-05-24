@@ -213,6 +213,27 @@ pub struct WorkExecutionTaskFileChangedPayload {
     pub work_execution_id: String,
     pub new_hash: String,
     pub new_status: Option<String>,
+    #[serde(default = "default_status_changed")]
+    pub status_changed: bool,
+    #[serde(default)]
+    pub notification_priority: TaskFileChangePriority,
+}
+
+fn default_status_changed() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskFileChangePriority {
+    Low,
+    Normal,
+}
+
+impl Default for TaskFileChangePriority {
+    fn default() -> Self {
+        Self::Normal
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -449,5 +470,21 @@ mod tests {
         });
 
         assert_eq!(data.event_type(), EventType::MergeFailed);
+    }
+
+    #[test]
+    fn task_file_changed_payload_defaults_priority_metadata() {
+        let json = r#"{
+            "work_execution_id": "01JTEST00000000000000000002",
+            "new_hash": "abc123",
+            "new_status": "working"
+        }"#;
+
+        let payload: WorkExecutionTaskFileChangedPayload = serde_json::from_str(json).unwrap();
+        assert!(payload.status_changed);
+        assert_eq!(
+            payload.notification_priority,
+            TaskFileChangePriority::Normal
+        );
     }
 }
