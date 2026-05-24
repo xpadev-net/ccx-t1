@@ -48,38 +48,44 @@ impl TaskWatcher {
         work_execution_id: String,
         project_dir: Utf8PathBuf,
     ) -> Result<Self, CcxError> {
-        let mut state = TaskWatcherState { last_seen_hash: None };
+        let mut state = TaskWatcherState {
+            last_seen_hash: None,
+        };
         let file = task_file.as_std_path().to_owned();
 
-        let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-            let ev = match res {
-                Ok(e) => e,
-                Err(e) => {
-                    tracing::warn!(error = %e, "task_watcher: notify error");
+        let mut watcher = notify::recommended_watcher(
+            move |res: notify::Result<notify::Event>| {
+                let ev = match res {
+                    Ok(e) => e,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "task_watcher: notify error");
+                        return;
+                    }
+                };
+                if !ev.kind.is_modify() && !ev.kind.is_create() {
                     return;
                 }
-            };
-            if !ev.kind.is_modify() && !ev.kind.is_create() {
-                return;
-            }
-            let content = match std::fs::read_to_string(&file) {
-                Ok(c) => c,
-                Err(e) => {
-                    tracing::warn!(path = %file.display(), error = %e, "task_watcher: read error");
-                    return;
+                let content = match std::fs::read_to_string(&file) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::warn!(path = %file.display(), error = %e, "task_watcher: read error");
+                        return;
+                    }
+                };
+                if let Some(payload) = observe(&content, &work_execution_id, &mut state) {
+                    let event = Event::new(
+                        &project_id,
+                        Actor::System,
+                        EventData::WorkExecutionTaskFileChanged(payload),
+                    );
+                    if let Err(e) =
+                        crate::persistence::jsonl::append_event_to_dir(&project_dir, &event)
+                    {
+                        tracing::warn!(error = %e, "task_watcher: append event error");
+                    }
                 }
-            };
-            if let Some(payload) = observe(&content, &work_execution_id, &mut state) {
-                let event = Event::new(
-                    &project_id,
-                    Actor::System,
-                    EventData::WorkExecutionTaskFileChanged(payload),
-                );
-                if let Err(e) = crate::persistence::jsonl::append_event_to_dir(&project_dir, &event) {
-                    tracing::warn!(error = %e, "task_watcher: append event error");
-                }
-            }
-        })?;
+            },
+        )?;
 
         watcher.watch(task_file.as_std_path(), RecursiveMode::NonRecursive)?;
         Ok(Self { _watcher: watcher })
@@ -91,7 +97,9 @@ mod tests {
     use super::*;
 
     fn state() -> TaskWatcherState {
-        TaskWatcherState { last_seen_hash: None }
+        TaskWatcherState {
+            last_seen_hash: None,
+        }
     }
 
     #[test]
@@ -141,7 +149,18 @@ mod tests {
         let mut s = state();
         let content = "---\nstatus: [unclosed\n---\n# task\n";
         let payload = observe(content, "we-1", &mut s).unwrap();
-        assert_eq!(payload.new_status, None, "malformed YAML must be best-effort (no panic)");
+        assert_eq!(
+            payload.new_status, None,
+            "malformed YAML must be best-effort (no panic)"
+        );
+    }
+
+    #[test]
+    fn invalid_front_matter_status_yields_none_status() {
+        let mut s = state();
+        let content = "---\nstatus: merging\n---\n# task\n";
+        let payload = observe(content, "we-1", &mut s).unwrap();
+        assert_eq!(payload.new_status, None);
     }
 
     #[test]
@@ -150,7 +169,10 @@ mod tests {
         let mut s2 = state();
         let p1 = observe("# same\n", "we-1", &mut s1).unwrap();
         let p2 = observe("# same\n", "we-2", &mut s2).unwrap();
-        assert_eq!(p1.new_hash, p2.new_hash, "SHA-256 must be content-dependent only");
+        assert_eq!(
+            p1.new_hash, p2.new_hash,
+            "SHA-256 must be content-dependent only"
+        );
     }
 
     #[test]
