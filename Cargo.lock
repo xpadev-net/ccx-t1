@@ -183,6 +183,7 @@ dependencies = [
  "clap",
  "directories",
  "fd-lock",
+ "libc",
  "notify",
  "predicates",
  "rusqlite",
