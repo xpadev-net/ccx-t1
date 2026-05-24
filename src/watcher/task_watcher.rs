@@ -1,10 +1,13 @@
 use camino::Utf8PathBuf;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use rusqlite::OptionalExtension;
 
+use crate::agent_runtime::cmux_adapter::{make_adapter, CmuxAdapter};
 use crate::domain::event::{
     Actor, Event, EventData, TaskFileChangePriority, WorkExecutionTaskFileChangedPayload,
 };
 use crate::error::CcxError;
+use crate::persistence::sqlite::open_db;
 use crate::watcher::front_matter::parse_front_matter;
 use crate::watcher::sha256_hex;
 
@@ -55,6 +58,68 @@ pub struct TaskWatcher {
     _watcher: RecommendedWatcher,
 }
 
+fn notify_orchestrator_task_file_changed(
+    conn: &rusqlite::Connection,
+    cmux: &dyn CmuxAdapter,
+    project_id: &str,
+    work_execution_id: &str,
+    priority: TaskFileChangePriority,
+) -> Result<bool, CcxError> {
+    if priority == TaskFileChangePriority::Low {
+        return Ok(false);
+    }
+
+    let cmux_tab_id: Option<String> = conn
+        .query_row(
+            "SELECT cmux_tab_id FROM agent_sessions
+             WHERE project_id = ?1
+               AND role = 'orchestrator'
+               AND state IN ('starting', 'running', 'idle')
+             ORDER BY started_at DESC
+             LIMIT 1",
+            rusqlite::params![project_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    let Some(cmux_tab_id) = cmux_tab_id else {
+        return Ok(false);
+    };
+
+    cmux.notify_user(
+        &cmux_tab_id,
+        &format!("task.md changed for work execution {work_execution_id}"),
+        "info",
+    )?;
+    Ok(true)
+}
+
+fn notify_orchestrator_task_file_changed_best_effort(
+    project_dir: &camino::Utf8Path,
+    project_id: &str,
+    work_execution_id: &str,
+    priority: TaskFileChangePriority,
+) {
+    if priority == TaskFileChangePriority::Low {
+        return;
+    }
+
+    let result = open_db(project_dir).and_then(|conn| {
+        let cmux = make_adapter();
+        notify_orchestrator_task_file_changed(
+            &conn,
+            cmux.as_ref(),
+            project_id,
+            work_execution_id,
+            priority,
+        )
+        .map(|_| ())
+    });
+    if let Err(e) = result {
+        tracing::warn!(error = %e, work_execution_id, "task_watcher: orchestrator notify error");
+    }
+}
+
 impl TaskWatcher {
     pub fn new(
         task_file: &camino::Utf8Path,
@@ -89,6 +154,7 @@ impl TaskWatcher {
                     }
                 };
                 if let Some(payload) = observe(&content, &work_execution_id, &mut state) {
+                    let priority = payload.notification_priority;
                     let event = Event::new(
                         &project_id,
                         Actor::System,
@@ -98,6 +164,13 @@ impl TaskWatcher {
                         crate::persistence::jsonl::append_event_to_dir(&project_dir, &event)
                     {
                         tracing::warn!(error = %e, "task_watcher: append event error");
+                    } else {
+                        notify_orchestrator_task_file_changed_best_effort(
+                            &project_dir,
+                            &project_id,
+                            &work_execution_id,
+                            priority,
+                        );
                     }
                 }
             },
@@ -111,6 +184,8 @@ impl TaskWatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent_runtime::cmux_adapter::AgentSessionSpec;
+    use std::sync::Mutex;
 
     fn state() -> TaskWatcherState {
         TaskWatcherState {
@@ -118,6 +193,71 @@ mod tests {
             last_seen_status: None,
             has_seen_observation: false,
         }
+    }
+
+    struct SpyCmuxAdapter {
+        notifications: Mutex<Vec<(String, String, String)>>,
+    }
+
+    impl SpyCmuxAdapter {
+        fn new() -> Self {
+            Self {
+                notifications: Mutex::new(vec![]),
+            }
+        }
+    }
+
+    impl CmuxAdapter for SpyCmuxAdapter {
+        fn ensure_workspace(
+            &self,
+            _project_id: &str,
+            _display_slug: &str,
+            _canonical_repo: &str,
+        ) -> Result<String, CcxError> {
+            Ok("ws".into())
+        }
+
+        fn create_agent_tab(&self, _spec: &AgentSessionSpec) -> Result<String, CcxError> {
+            Ok("tab".into())
+        }
+
+        fn close_tab(&self, _tab_id: &str) -> Result<(), CcxError> {
+            Ok(())
+        }
+
+        fn notify_user(&self, tab_id: &str, message: &str, level: &str) -> Result<(), CcxError> {
+            self.notifications.lock().unwrap().push((
+                tab_id.to_string(),
+                message.to_string(),
+                level.to_string(),
+            ));
+            Ok(())
+        }
+    }
+
+    fn seed_project_and_orchestrator(
+        conn: &rusqlite::Connection,
+        project_id: &str,
+        cmux_tab_id: &str,
+    ) {
+        conn.execute(
+            "INSERT INTO projects (
+                project_id, display_slug, canonical_repo, task_source_file, created_at
+             ) VALUES (?1, 'test', '/tmp/repo', '/tmp/repo/tasks.md', '2026-05-24T00:00:00Z')",
+            rusqlite::params![project_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO agent_sessions (
+                agent_session_id, project_id, work_execution_id, state, role, attach_mode,
+                cmux_tab_id, tmux_session_id, cwd, started_at, last_heartbeat_at
+             ) VALUES (
+                '01JTEST00000000000000000002', ?1, NULL, 'running', 'orchestrator', NULL,
+                ?2, 'tmux-orch', '/tmp/repo', '2026-05-24T00:00:01Z', '2026-05-24T00:00:01Z'
+             )",
+            rusqlite::params![project_id, cmux_tab_id],
+        )
+        .unwrap();
     }
 
     #[test]
@@ -236,5 +376,73 @@ mod tests {
         let p1 = observe("# a\n", "we-1", &mut s).unwrap();
         let p2 = observe("# b\n", "we-1", &mut s).unwrap();
         assert_ne!(p1.new_hash, p2.new_hash);
+    }
+
+    #[test]
+    fn normal_priority_notifies_active_orchestrator() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = camino::Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
+        let conn = open_db(&dir).unwrap();
+        let project_id = "01JTEST00000000000000000001";
+        seed_project_and_orchestrator(&conn, project_id, "tab-orch");
+        let cmux = SpyCmuxAdapter::new();
+
+        let notified = notify_orchestrator_task_file_changed(
+            &conn,
+            &cmux,
+            project_id,
+            "01JTEST00000000000000000003",
+            TaskFileChangePriority::Normal,
+        )
+        .unwrap();
+
+        assert!(notified);
+        let notifications = cmux.notifications.lock().unwrap();
+        assert_eq!(notifications.len(), 1);
+        assert_eq!(notifications[0].0, "tab-orch");
+        assert_eq!(notifications[0].2, "info");
+        assert!(notifications[0].1.contains("01JTEST00000000000000000003"));
+    }
+
+    #[test]
+    fn low_priority_skips_orchestrator_notification() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = camino::Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
+        let conn = open_db(&dir).unwrap();
+        let project_id = "01JTEST00000000000000000001";
+        seed_project_and_orchestrator(&conn, project_id, "tab-orch");
+        let cmux = SpyCmuxAdapter::new();
+
+        let notified = notify_orchestrator_task_file_changed(
+            &conn,
+            &cmux,
+            project_id,
+            "01JTEST00000000000000000003",
+            TaskFileChangePriority::Low,
+        )
+        .unwrap();
+
+        assert!(!notified);
+        assert!(cmux.notifications.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn missing_orchestrator_session_is_not_an_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = camino::Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
+        let conn = open_db(&dir).unwrap();
+        let cmux = SpyCmuxAdapter::new();
+
+        let notified = notify_orchestrator_task_file_changed(
+            &conn,
+            &cmux,
+            "01JTEST00000000000000000001",
+            "01JTEST00000000000000000003",
+            TaskFileChangePriority::Normal,
+        )
+        .unwrap();
+
+        assert!(!notified);
+        assert!(cmux.notifications.lock().unwrap().is_empty());
     }
 }
