@@ -185,9 +185,10 @@ fn resolve_attach_work_execution(
         if !file_type.is_dir() {
             continue;
         }
-        let project_dir = Utf8PathBuf::try_from(entry.path()).map_err(|e| {
-            CcxError::Other(anyhow::anyhow!("project directory is not valid UTF-8: {e}"))
-        })?;
+        let project_dir = match Utf8PathBuf::try_from(entry.path()) {
+            Ok(path) => path,
+            Err(_) => continue,
+        };
         if !project_dir.join("state.sqlite").exists() {
             continue;
         }

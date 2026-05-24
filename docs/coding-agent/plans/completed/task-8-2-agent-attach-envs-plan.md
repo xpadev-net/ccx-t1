@@ -46,6 +46,7 @@ Research waived: `env_builder.rs` already defines the expected nine variables an
 - 2026-05-25: Validated with `rtk rustfmt --check src/cli/agent.rs`, `rtk cargo test attach_injects_all_agent_envs_into_tmux_launch`, and `rtk cargo test env_builder`.
 - 2026-05-25: Harness reviewer returned APPROVED with no findings.
 - 2026-05-25: Addressed `gh-review-hook` feedback by fixing non-JSON output and adding direct `--project-id` lookup for attach.
+- 2026-05-25: Addressed follow-up `gh-review-hook` feedback by skipping non-UTF-8 project scan entries.
 
 ## Decision Log
 
