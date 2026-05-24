@@ -2,8 +2,9 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::process::{Command, Output, Stdio};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use tracing::warn;
 
@@ -227,17 +228,7 @@ impl CliCmuxAdapter {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, CcxError> {
         let params_json = serde_json::to_string(&params)?;
-        let output = Command::new(&self.cli_path)
-            .arg("rpc")
-            .arg(method)
-            .arg(params_json)
-            .output()
-            .map_err(|e| {
-                CcxError::Other(anyhow::anyhow!(
-                    "cmux CLI failed to execute {}: {e}",
-                    self.cli_path.display()
-                ))
-            })?;
+        let output = self.run_rpc_process(method, params_json)?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -262,6 +253,39 @@ impl CliCmuxAdapter {
         }
 
         Ok(response.get("result").cloned().unwrap_or(response))
+    }
+
+    fn run_rpc_process(&self, method: &str, params_json: String) -> Result<Output, CcxError> {
+        let mut child = Command::new(&self.cli_path)
+            .arg("rpc")
+            .arg(method)
+            .arg(params_json)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| {
+                CcxError::Other(anyhow::anyhow!(
+                    "cmux CLI failed to execute {}: {e}",
+                    self.cli_path.display()
+                ))
+            })?;
+
+        let deadline = Instant::now() + RPC_IO_TIMEOUT;
+        loop {
+            if child.try_wait()?.is_some() {
+                return child.wait_with_output().map_err(CcxError::from);
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(CcxError::Other(anyhow::anyhow!(
+                    "cmux CLI rpc {method} timed out after {:?}",
+                    RPC_IO_TIMEOUT
+                )));
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 }
 
@@ -332,6 +356,7 @@ impl CmuxAdapter for CliCmuxAdapter {
 pub struct CliFallbackCmuxAdapter {
     cli: CliCmuxAdapter,
     headless: HeadlessCmuxAdapter,
+    mode: Mutex<CliFallbackMode>,
 }
 
 impl CliFallbackCmuxAdapter {
@@ -339,8 +364,24 @@ impl CliFallbackCmuxAdapter {
         Self {
             cli: CliCmuxAdapter::new(cli_path),
             headless: HeadlessCmuxAdapter,
+            mode: Mutex::new(CliFallbackMode::Unknown),
         }
     }
+
+    fn mode(&self) -> CliFallbackMode {
+        *self.mode.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn set_mode(&self, mode: CliFallbackMode) {
+        *self.mode.lock().unwrap_or_else(|e| e.into_inner()) = mode;
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CliFallbackMode {
+    Unknown,
+    Cli,
+    Headless,
 }
 
 impl CmuxAdapter for CliFallbackCmuxAdapter {
@@ -350,45 +391,95 @@ impl CmuxAdapter for CliFallbackCmuxAdapter {
         display_slug: &str,
         canonical_repo: &str,
     ) -> Result<String, CcxError> {
+        if self.mode() == CliFallbackMode::Headless {
+            return self
+                .headless
+                .ensure_workspace(project_id, display_slug, canonical_repo);
+        }
+
         match self
             .cli
             .ensure_workspace(project_id, display_slug, canonical_repo)
         {
-            Ok(id) => Ok(id),
+            Ok(id) => {
+                self.set_mode(CliFallbackMode::Cli);
+                Ok(id)
+            }
             Err(e) => {
-                warn!("cmux CLI workspace fallback failed, running headless: {e}");
-                self.headless
-                    .ensure_workspace(project_id, display_slug, canonical_repo)
+                if self.mode() == CliFallbackMode::Cli {
+                    Err(e)
+                } else {
+                    warn!("cmux CLI workspace fallback failed, running headless: {e}");
+                    self.set_mode(CliFallbackMode::Headless);
+                    self.headless
+                        .ensure_workspace(project_id, display_slug, canonical_repo)
+                }
             }
         }
     }
 
     fn create_agent_tab(&self, spec: &AgentSessionSpec) -> Result<String, CcxError> {
+        if self.mode() == CliFallbackMode::Headless {
+            return self.headless.create_agent_tab(spec);
+        }
+
         match self.cli.create_agent_tab(spec) {
-            Ok(id) => Ok(id),
+            Ok(id) => {
+                self.set_mode(CliFallbackMode::Cli);
+                Ok(id)
+            }
             Err(e) => {
-                warn!("cmux CLI tab fallback failed, running headless: {e}");
-                self.headless.create_agent_tab(spec)
+                if self.mode() == CliFallbackMode::Cli {
+                    Err(e)
+                } else {
+                    warn!("cmux CLI tab fallback failed, running headless: {e}");
+                    self.set_mode(CliFallbackMode::Headless);
+                    self.headless.create_agent_tab(spec)
+                }
             }
         }
     }
 
     fn close_tab(&self, tab_id: &str) -> Result<(), CcxError> {
+        if self.mode() == CliFallbackMode::Headless {
+            return self.headless.close_tab(tab_id);
+        }
+
         match self.cli.close_tab(tab_id) {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                self.set_mode(CliFallbackMode::Cli);
+                Ok(())
+            }
             Err(e) => {
-                warn!("cmux CLI close fallback failed, running headless: {e}");
-                self.headless.close_tab(tab_id)
+                if self.mode() == CliFallbackMode::Cli {
+                    Err(e)
+                } else {
+                    warn!("cmux CLI close fallback failed, running headless: {e}");
+                    self.set_mode(CliFallbackMode::Headless);
+                    self.headless.close_tab(tab_id)
+                }
             }
         }
     }
 
     fn notify_user(&self, tab_id: &str, message: &str, level: &str) -> Result<(), CcxError> {
+        if self.mode() == CliFallbackMode::Headless {
+            return self.headless.notify_user(tab_id, message, level);
+        }
+
         match self.cli.notify_user(tab_id, message, level) {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                self.set_mode(CliFallbackMode::Cli);
+                Ok(())
+            }
             Err(e) => {
-                warn!("cmux CLI notify fallback failed, running headless: {e}");
-                self.headless.notify_user(tab_id, message, level)
+                if self.mode() == CliFallbackMode::Cli {
+                    Err(e)
+                } else {
+                    warn!("cmux CLI notify fallback failed, running headless: {e}");
+                    self.set_mode(CliFallbackMode::Headless);
+                    self.headless.notify_user(tab_id, message, level)
+                }
             }
         }
     }
@@ -438,8 +529,7 @@ fn cmux_cli_path() -> PathBuf {
 
 fn cmux_cli_available(cli_path: &Path) -> bool {
     Command::new(cli_path)
-        .arg("help")
-        .arg("rpc")
+        .arg("--version")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -504,7 +594,7 @@ mod tests {
         let script_body = format!(
             r#"#!/bin/sh
 printf '%s|%s|%s\n' "$1" "$2" "$3" >> '{}'
-if [ "$1" = "help" ]; then
+if [ "$1" = "--version" ]; then
   exit 0
 fi
 if [ "$1" != "rpc" ]; then
@@ -815,7 +905,7 @@ esac
         let script = dir.path().join("cmux");
         fs::write(
             &script,
-            "#!/bin/sh\nif [ \"$1\" = \"help\" ]; then exit 0; fi\nexit 42\n",
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then exit 0; fi\nexit 42\n",
         )
         .unwrap();
         let mut perms = fs::metadata(&script).unwrap().permissions();
@@ -831,5 +921,34 @@ esac
         let ws_id = adapter.ensure_workspace("proj-x", "slug", "/repo").unwrap();
 
         assert_eq!(ws_id, "headless-ws-proj-x");
+    }
+
+    #[test]
+    fn cli_fallback_does_not_switch_to_headless_after_cli_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("cmux");
+        fs::write(
+            &script,
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then exit 0; fi\nif [ \"$2\" = \"workspace.create\" ]; then printf '{\"workspace_id\":\"ws-cli\"}\\n'; exit 0; fi\nexit 42\n",
+        )
+        .unwrap();
+        let mut perms = fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script, perms).unwrap();
+        let absent = dir
+            .path()
+            .join("absent.sock")
+            .to_string_lossy()
+            .into_owned();
+
+        let adapter = make_adapter_from_with_cli(&absent, script);
+        let ws_id = adapter.ensure_workspace("proj-x", "slug", "/repo").unwrap();
+        let tab_result = adapter.create_agent_tab(&sample_agent_spec());
+
+        assert_eq!(ws_id, "ws-cli");
+        assert!(
+            tab_result.is_err(),
+            "adapter should not report a headless tab after establishing CLI state"
+        );
     }
 }

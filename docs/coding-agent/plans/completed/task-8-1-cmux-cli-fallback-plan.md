@@ -44,6 +44,7 @@ Research waived: existing `cmux_adapter.rs` and `gui/CLI/cmux.swift` confirm `cm
 - 2026-05-25: Plan created. Implementing Task_1 directly under user-requested automation loop.
 - 2026-05-25: Implemented CLI fallback, updated `z/tasks.md`, and validated with `rtk rustfmt --check src/agent_runtime/cmux_adapter.rs` plus `rtk cargo test cmux_adapter`.
 - 2026-05-25: Harness reviewer returned APPROVED with no findings.
+- 2026-05-25: Addressed `gh-review-hook` findings by adding a CLI subprocess timeout, avoiding headless success after CLI state is established, and replacing the fragile `help rpc` probe with `--version`.
 
 ## Decision Log
 
