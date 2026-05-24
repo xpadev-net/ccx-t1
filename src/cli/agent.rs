@@ -7,6 +7,7 @@ use crate::agent_runtime::cmux_adapter::make_adapter;
 use crate::agent_runtime::env_builder::{build_agent_envs, AgentEnvInput};
 use crate::agent_runtime::launch::{launch_agent, LaunchResult, LaunchSpec};
 use crate::agent_runtime::lifecycle::{handle_lifecycle_stop, LifecycleStopConfig};
+use crate::agent_runtime::prompt::{read_message, send_to_tmux, PromptSource};
 use crate::agent_runtime::tmux_adapter::{ShellTmuxAdapter, TmuxAdapter};
 use crate::config::{ccx_home, project_dir};
 use crate::domain::event::{generate_id, Actor, AgentSessionStoppedPayload, Event, EventData};
@@ -255,6 +256,17 @@ pub struct PromptArgs {
 }
 
 pub fn prompt(args: PromptArgs) -> Result<(), CcxError> {
+    prompt_with_sender(args, send_to_tmux)
+}
+
+fn prompt_with_sender(
+    args: PromptArgs,
+    sender: impl FnOnce(&str, &str) -> Result<(), CcxError>,
+) -> Result<(), CcxError> {
+    let source = prompt_source(&args);
+    let message = read_message(&source)?;
+    sender(&args.session_id, &message)?;
+
     if args.json {
         println!(
             "{}",
@@ -264,12 +276,19 @@ pub fn prompt(args: PromptArgs) -> Result<(), CcxError> {
             }))?
         );
     } else {
-        println!(
-            "prompt sent to {} (skeleton — not yet implemented)",
-            args.session_id
-        );
+        println!("prompt sent to {}", args.session_id);
     }
     Ok(())
+}
+
+fn prompt_source(args: &PromptArgs) -> PromptSource {
+    if let Some(message) = &args.message {
+        return PromptSource::Text(message.clone());
+    }
+    if let Some(path) = &args.message_file {
+        return PromptSource::File(PathBuf::from(path));
+    }
+    PromptSource::Stdin
 }
 
 // ---------------------------------------------------------------------------
@@ -696,5 +715,57 @@ mod tests {
                     if payload.agent_session_id == "01JTEST00000000000000000003"
             )
         }));
+    }
+
+    #[test]
+    fn prompt_sends_inline_message() {
+        let captured = Mutex::new(None);
+        prompt_with_sender(
+            PromptArgs {
+                session_id: "sess-1".into(),
+                message: Some("hello".into()),
+                message_file: None,
+                stdin: false,
+                json: true,
+            },
+            |session_id, message| {
+                *captured.lock().unwrap() = Some((session_id.to_string(), message.to_string()));
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            captured.lock().unwrap().clone(),
+            Some(("sess-1".into(), "hello".into()))
+        );
+    }
+
+    #[test]
+    fn prompt_sends_message_file_content() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        use std::io::Write;
+        file.write_all(b"from file\n").unwrap();
+        let captured = Mutex::new(None);
+
+        prompt_with_sender(
+            PromptArgs {
+                session_id: "sess-2".into(),
+                message: None,
+                message_file: Some(file.path().to_string_lossy().into_owned()),
+                stdin: false,
+                json: true,
+            },
+            |session_id, message| {
+                *captured.lock().unwrap() = Some((session_id.to_string(), message.to_string()));
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            captured.lock().unwrap().clone(),
+            Some(("sess-2".into(), "from file\n".into()))
+        );
     }
 }
