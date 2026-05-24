@@ -45,6 +45,7 @@ Research waived: the CLI prompt handler is a skeleton and can be connected direc
 - 2026-05-25: Wired `agent prompt` to `read_message` and `send_to_tmux`, with sender injection for tests.
 - 2026-05-25: Validated with `rtk rustfmt --check src/cli/agent.rs`, `rtk cargo test prompt_sends_`, and `rtk cargo test read_message`.
 - 2026-05-25: Harness reviewer returned APPROVED with no findings.
+- 2026-05-25: Addressed `gh-review-hook` feedback by explicitly handling `--stdin` in source selection.
 
 ## Decision Log
 

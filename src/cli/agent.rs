@@ -288,6 +288,10 @@ fn prompt_source(args: &PromptArgs) -> PromptSource {
     if let Some(path) = &args.message_file {
         return PromptSource::File(PathBuf::from(path));
     }
+    if args.stdin {
+        return PromptSource::Stdin;
+    }
+    // No input source specified; default to stdin for Unix-style piping.
     PromptSource::Stdin
 }
 
