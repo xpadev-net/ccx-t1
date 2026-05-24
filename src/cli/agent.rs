@@ -288,7 +288,18 @@ pub struct StopArgs {
 
 pub fn stop(args: StopArgs) -> Result<(), CcxError> {
     let dir = project_dir(&args.project_id)?;
-    let conn = open_db(&dir)?;
+    let tmux = ShellTmuxAdapter;
+    let cmux = make_adapter();
+    stop_with_adapters(args, &dir, &tmux, cmux.as_ref())
+}
+
+fn stop_with_adapters(
+    args: StopArgs,
+    dir: &Utf8Path,
+    tmux: &dyn TmuxAdapter,
+    cmux: &dyn crate::agent_runtime::cmux_adapter::CmuxAdapter,
+) -> Result<(), CcxError> {
+    let conn = open_db(dir)?;
 
     let cmux_tab_id: String = conn
         .query_row(
@@ -317,11 +328,9 @@ pub fn stop(args: StopArgs) -> Result<(), CcxError> {
     );
     append_event_to_dir(&dir, &event)?;
 
-    let tmux = ShellTmuxAdapter;
     let kill_result = tmux.kill_session(&args.session_id);
     // close_tab is best-effort and runs unconditionally so the tab is cleaned up
     // even when kill_session returns an unexpected error.
-    let cmux = make_adapter();
     let _ = cmux.close_tab(&cmux_tab_id);
     kill_result?;
 
@@ -451,8 +460,9 @@ pub fn lifecycle_stop(args: LifecycleStopArgs) -> Result<(), CcxError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent_runtime::cmux_adapter::HeadlessCmuxAdapter;
+    use crate::agent_runtime::cmux_adapter::{AgentSessionSpec, CmuxAdapter, HeadlessCmuxAdapter};
     use crate::error::CcxError;
+    use crate::persistence::jsonl::read_events_from_dir;
     use crate::persistence::sqlite::open_db;
     use std::collections::HashMap;
     use std::path::Path;
@@ -461,6 +471,7 @@ mod tests {
     struct CaptureTmuxAdapter {
         envs: Mutex<Option<HashMap<String, String>>>,
         cwd: Mutex<Option<PathBuf>>,
+        killed: Mutex<Vec<String>>,
     }
 
     impl CaptureTmuxAdapter {
@@ -468,6 +479,7 @@ mod tests {
             Self {
                 envs: Mutex::new(None),
                 cwd: Mutex::new(None),
+                killed: Mutex::new(Vec::new()),
             }
         }
     }
@@ -484,7 +496,8 @@ mod tests {
             Ok(())
         }
 
-        fn kill_session(&self, _session_id: &str) -> Result<(), CcxError> {
+        fn kill_session(&self, session_id: &str) -> Result<(), CcxError> {
+            self.killed.lock().unwrap().push(session_id.to_string());
             Ok(())
         }
 
@@ -505,6 +518,42 @@ mod tests {
         }
 
         fn send_literal(&self, _session_id: &str, _text: &str) -> Result<(), CcxError> {
+            Ok(())
+        }
+    }
+
+    struct CaptureCmuxAdapter {
+        closed: Mutex<Vec<String>>,
+    }
+
+    impl CaptureCmuxAdapter {
+        fn new() -> Self {
+            Self {
+                closed: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl CmuxAdapter for CaptureCmuxAdapter {
+        fn ensure_workspace(
+            &self,
+            project_id: &str,
+            _display_slug: &str,
+            _canonical_repo: &str,
+        ) -> Result<String, CcxError> {
+            Ok(format!("ws-{project_id}"))
+        }
+
+        fn create_agent_tab(&self, spec: &AgentSessionSpec) -> Result<String, CcxError> {
+            Ok(format!("tab-{}", spec.session_id))
+        }
+
+        fn close_tab(&self, tab_id: &str) -> Result<(), CcxError> {
+            self.closed.lock().unwrap().push(tab_id.to_string());
+            Ok(())
+        }
+
+        fn notify_user(&self, _tab_id: &str, _message: &str, _level: &str) -> Result<(), CcxError> {
             Ok(())
         }
     }
@@ -589,5 +638,63 @@ mod tests {
 
         let cwd = tmux.cwd.lock().unwrap().clone().expect("tmux cwd");
         assert_eq!(cwd, PathBuf::from("/repos/myproject/.ccx/we-001"));
+    }
+
+    #[test]
+    fn stop_kills_tmux_closes_cmux_and_records_event() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
+        seed_project(&home).unwrap();
+        let project_dir = home.join("projects").join("01JTEST00000000000000000001");
+        let conn = open_db(&project_dir).unwrap();
+        conn.execute(
+            "INSERT INTO agent_sessions (
+                agent_session_id, project_id, work_execution_id, state, role,
+                attach_mode, cmux_tab_id, tmux_session_id, cwd, started_at,
+                last_heartbeat_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            rusqlite::params![
+                "01JTEST00000000000000000003",
+                "01JTEST00000000000000000001",
+                "01JTEST00000000000000000002",
+                "running",
+                "worker",
+                "writer",
+                "tab-123",
+                "ccx-01JTEST00000000000000000003",
+                "/repos/myproject/.ccx/we-001",
+                "2026-05-25T00:00:00Z",
+                "2026-05-25T00:00:00Z",
+            ],
+        )
+        .unwrap();
+
+        let tmux = CaptureTmuxAdapter::new();
+        let cmux = CaptureCmuxAdapter::new();
+        stop_with_adapters(
+            StopArgs {
+                project_id: "01JTEST00000000000000000001".into(),
+                session_id: "01JTEST00000000000000000003".into(),
+                json: true,
+            },
+            &project_dir,
+            &tmux,
+            &cmux,
+        )
+        .unwrap();
+
+        assert_eq!(
+            *tmux.killed.lock().unwrap(),
+            vec!["01JTEST00000000000000000003"]
+        );
+        assert_eq!(*cmux.closed.lock().unwrap(), vec!["tab-123"]);
+        let events = read_events_from_dir(&project_dir).unwrap();
+        assert!(events.iter().any(|event| {
+            matches!(
+                &event.data,
+                EventData::AgentSessionStopped(payload)
+                    if payload.agent_session_id == "01JTEST00000000000000000003"
+            )
+        }));
     }
 }
