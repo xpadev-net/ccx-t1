@@ -12,6 +12,7 @@ use crate::watcher::sha256_hex;
 pub struct TaskWatcherState {
     pub last_seen_hash: Option<String>,
     pub last_seen_status: Option<String>,
+    pub has_seen_observation: bool,
 }
 
 /// Pure observe step: hash the content, deduplicate, parse front matter best-effort.
@@ -29,13 +30,14 @@ pub fn observe(
     }
     state.last_seen_hash = Some(hash.clone());
     let new_status = parse_front_matter(content).ok().and_then(|fm| fm.status);
-    let status_changed = new_status != state.last_seen_status;
+    let status_changed = !state.has_seen_observation || new_status != state.last_seen_status;
     let notification_priority = if status_changed {
         TaskFileChangePriority::Normal
     } else {
         TaskFileChangePriority::Low
     };
     state.last_seen_status.clone_from(&new_status);
+    state.has_seen_observation = true;
     Some(WorkExecutionTaskFileChangedPayload {
         work_execution_id: work_execution_id.to_string(),
         new_hash: hash,
@@ -63,6 +65,7 @@ impl TaskWatcher {
         let mut state = TaskWatcherState {
             last_seen_hash: None,
             last_seen_status: None,
+            has_seen_observation: false,
         };
         let file = task_file.as_std_path().to_owned();
 
@@ -113,6 +116,7 @@ mod tests {
         TaskWatcherState {
             last_seen_hash: None,
             last_seen_status: None,
+            has_seen_observation: false,
         }
     }
 
@@ -163,6 +167,17 @@ mod tests {
         let payload = observe("---\nstatus: working\n---\n# modified\n", "we-1", &mut s).unwrap();
         assert!(!payload.status_changed);
         assert_eq!(payload.notification_priority, TaskFileChangePriority::Low);
+    }
+
+    #[test]
+    fn first_observation_without_status_uses_normal_notification_priority() {
+        let mut s = state();
+        let payload = observe("# no front matter\n", "we-1", &mut s).unwrap();
+        assert!(payload.status_changed);
+        assert_eq!(
+            payload.notification_priority,
+            TaskFileChangePriority::Normal
+        );
     }
 
     #[test]
