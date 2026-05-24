@@ -1,6 +1,8 @@
 use camino::Utf8PathBuf;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use rusqlite::{Connection, OptionalExtension};
 
+use crate::agent_runtime::cmux_adapter::{make_adapter, CmuxAdapter};
 use crate::domain::event::{Actor, Event, EventData, TaskSourceFileChangedPayload};
 use crate::error::CcxError;
 use crate::watcher::sha256_hex;
@@ -38,45 +40,114 @@ pub struct SourceWatcher {
     _watcher: RecommendedWatcher,
 }
 
+fn notify_orchestrator_source_file_changed(
+    conn: &Connection,
+    cmux: &dyn CmuxAdapter,
+    project_id: &str,
+    task_source_file: &str,
+) -> Result<bool, CcxError> {
+    let cmux_tab_id: Option<String> = conn
+        .query_row(
+            "SELECT cmux_tab_id FROM agent_sessions
+             WHERE project_id = ?1
+               AND role = 'orchestrator'
+               AND state IN ('starting', 'running', 'idle')
+             ORDER BY started_at DESC
+             LIMIT 1",
+            rusqlite::params![project_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten();
+
+    let Some(cmux_tab_id) = cmux_tab_id else {
+        return Ok(false);
+    };
+
+    cmux.notify_user(
+        &cmux_tab_id,
+        &format!("task source changed: {task_source_file}"),
+        "info",
+    )?;
+    Ok(true)
+}
+
+fn open_notification_db(project_dir: &camino::Utf8Path) -> Result<Connection, CcxError> {
+    let conn = Connection::open_with_flags(
+        project_dir.join("state.sqlite").as_std_path(),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )?;
+    conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;")?;
+    Ok(conn)
+}
+
+fn notify_orchestrator_source_file_changed_best_effort(
+    project_dir: &camino::Utf8Path,
+    project_id: &str,
+    task_source_file: &str,
+) {
+    let result = open_notification_db(project_dir).and_then(|conn| {
+        let cmux = make_adapter();
+        notify_orchestrator_source_file_changed(&conn, cmux.as_ref(), project_id, task_source_file)
+            .map(|_| ())
+    });
+    if let Err(e) = result {
+        tracing::warn!(error = %e, task_source_file, "source_watcher: orchestrator notify error");
+    }
+}
+
 impl SourceWatcher {
     pub fn new(
         source_file: &camino::Utf8Path,
         project_id: String,
         project_dir: Utf8PathBuf,
     ) -> Result<Self, CcxError> {
-        let mut state = SourceWatcherState { last_seen_hash: None };
+        let mut state = SourceWatcherState {
+            last_seen_hash: None,
+        };
         let file = source_file.as_std_path().to_owned();
         let source_path = source_file.to_string();
 
-        let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-            let ev = match res {
-                Ok(e) => e,
-                Err(e) => {
-                    tracing::warn!(error = %e, "source_watcher: notify error");
+        let mut watcher = notify::recommended_watcher(
+            move |res: notify::Result<notify::Event>| {
+                let ev = match res {
+                    Ok(e) => e,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "source_watcher: notify error");
+                        return;
+                    }
+                };
+                if !ev.kind.is_modify() && !ev.kind.is_create() {
                     return;
                 }
-            };
-            if !ev.kind.is_modify() && !ev.kind.is_create() {
-                return;
-            }
-            let content = match std::fs::read_to_string(&file) {
-                Ok(c) => c,
-                Err(e) => {
-                    tracing::warn!(path = %file.display(), error = %e, "source_watcher: read error");
-                    return;
+                let content = match std::fs::read_to_string(&file) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::warn!(path = %file.display(), error = %e, "source_watcher: read error");
+                        return;
+                    }
+                };
+                if let Some(payload) = observe(&content, &source_path, &mut state) {
+                    let task_source_file = payload.task_source_file.clone();
+                    let event = Event::new(
+                        &project_id,
+                        Actor::System,
+                        EventData::TaskSourceFileChanged(payload),
+                    );
+                    if let Err(e) =
+                        crate::persistence::jsonl::append_event_to_dir(&project_dir, &event)
+                    {
+                        tracing::warn!(error = %e, "source_watcher: append event error");
+                    } else {
+                        notify_orchestrator_source_file_changed_best_effort(
+                            &project_dir,
+                            &project_id,
+                            &task_source_file,
+                        );
+                    }
                 }
-            };
-            if let Some(payload) = observe(&content, &source_path, &mut state) {
-                let event = Event::new(
-                    &project_id,
-                    Actor::System,
-                    EventData::TaskSourceFileChanged(payload),
-                );
-                if let Err(e) = crate::persistence::jsonl::append_event_to_dir(&project_dir, &event) {
-                    tracing::warn!(error = %e, "source_watcher: append event error");
-                }
-            }
-        })?;
+            },
+        )?;
 
         watcher.watch(source_file.as_std_path(), RecursiveMode::NonRecursive)?;
         Ok(Self { _watcher: watcher })
@@ -86,9 +157,79 @@ impl SourceWatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent_runtime::cmux_adapter::AgentSessionSpec;
+    use crate::persistence::sqlite::open_db;
+    use std::sync::Mutex;
 
     fn state() -> SourceWatcherState {
-        SourceWatcherState { last_seen_hash: None }
+        SourceWatcherState {
+            last_seen_hash: None,
+        }
+    }
+
+    struct SpyCmuxAdapter {
+        notifications: Mutex<Vec<(String, String, String)>>,
+    }
+
+    impl SpyCmuxAdapter {
+        fn new() -> Self {
+            Self {
+                notifications: Mutex::new(vec![]),
+            }
+        }
+    }
+
+    impl CmuxAdapter for SpyCmuxAdapter {
+        fn ensure_workspace(
+            &self,
+            _project_id: &str,
+            _display_slug: &str,
+            _canonical_repo: &str,
+        ) -> Result<String, CcxError> {
+            Ok("ws".into())
+        }
+
+        fn create_agent_tab(&self, _spec: &AgentSessionSpec) -> Result<String, CcxError> {
+            Ok("tab".into())
+        }
+
+        fn close_tab(&self, _tab_id: &str) -> Result<(), CcxError> {
+            Ok(())
+        }
+
+        fn notify_user(&self, tab_id: &str, message: &str, level: &str) -> Result<(), CcxError> {
+            self.notifications.lock().unwrap().push((
+                tab_id.to_string(),
+                message.to_string(),
+                level.to_string(),
+            ));
+            Ok(())
+        }
+    }
+
+    fn seed_project_and_orchestrator(
+        conn: &rusqlite::Connection,
+        project_id: &str,
+        cmux_tab_id: &str,
+    ) {
+        conn.execute(
+            "INSERT INTO projects (
+                project_id, display_slug, canonical_repo, task_source_file, created_at
+             ) VALUES (?1, 'test', '/tmp/repo', '/tmp/repo/tasks.md', '2026-05-24T00:00:00Z')",
+            rusqlite::params![project_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO agent_sessions (
+                agent_session_id, project_id, work_execution_id, state, role, attach_mode,
+                cmux_tab_id, tmux_session_id, cwd, started_at, last_heartbeat_at
+             ) VALUES (
+                '01JTEST00000000000000000002', ?1, NULL, 'running', 'orchestrator', NULL,
+                ?2, 'tmux-orch', '/tmp/repo', '2026-05-24T00:00:01Z', '2026-05-24T00:00:01Z'
+             )",
+            rusqlite::params![project_id, cmux_tab_id],
+        )
+        .unwrap();
     }
 
     #[test]
@@ -141,5 +282,96 @@ mod tests {
         let p = observe("any content", "/tasks.md", &mut s);
         assert!(p.is_some());
         assert!(s.last_seen_hash.is_some());
+    }
+
+    #[test]
+    fn source_change_notifies_active_orchestrator() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = camino::Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
+        let conn = open_db(&dir).unwrap();
+        let project_id = "01JTEST00000000000000000001";
+        seed_project_and_orchestrator(&conn, project_id, "tab-orch");
+        let cmux = SpyCmuxAdapter::new();
+
+        let notified = notify_orchestrator_source_file_changed(
+            &conn,
+            &cmux,
+            project_id,
+            "/tmp/repo/z/tasks.md",
+        )
+        .unwrap();
+
+        assert!(notified);
+        let notifications = cmux.notifications.lock().unwrap();
+        assert_eq!(notifications.len(), 1);
+        assert_eq!(notifications[0].0, "tab-orch");
+        assert_eq!(notifications[0].2, "info");
+        assert!(notifications[0].1.contains("/tmp/repo/z/tasks.md"));
+    }
+
+    #[test]
+    fn missing_orchestrator_session_is_not_an_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = camino::Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
+        let conn = open_db(&dir).unwrap();
+        let cmux = SpyCmuxAdapter::new();
+
+        let notified = notify_orchestrator_source_file_changed(
+            &conn,
+            &cmux,
+            "01JTEST00000000000000000001",
+            "/tmp/repo/z/tasks.md",
+        )
+        .unwrap();
+
+        assert!(!notified);
+        assert!(cmux.notifications.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn null_orchestrator_tab_id_is_not_an_error() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let project_id = "01JTEST00000000000000000001";
+        conn.execute_batch(
+            "CREATE TABLE agent_sessions (
+                agent_session_id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                state TEXT NOT NULL,
+                role TEXT NOT NULL,
+                cmux_tab_id TEXT,
+                started_at TEXT NOT NULL
+             );",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO agent_sessions (
+                agent_session_id, project_id, state, role, cmux_tab_id, started_at
+             ) VALUES ('01JTEST00000000000000000002', ?1, 'running', 'orchestrator', NULL, '2026-05-24T00:00:01Z')",
+            rusqlite::params![project_id],
+        )
+        .unwrap();
+        let cmux = SpyCmuxAdapter::new();
+
+        let notified = notify_orchestrator_source_file_changed(
+            &conn,
+            &cmux,
+            project_id,
+            "/tmp/repo/z/tasks.md",
+        )
+        .unwrap();
+
+        assert!(!notified);
+        assert!(cmux.notifications.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn notification_db_open_does_not_create_missing_database() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = camino::Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
+
+        let result = open_notification_db(&dir);
+
+        assert!(result.is_err());
+        assert!(!dir.join("state.sqlite").exists());
     }
 }
