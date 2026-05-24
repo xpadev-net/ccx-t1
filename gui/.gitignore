@@ -1,0 +1,54 @@
+# Xcode
+.build/
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# macOS
+.DS_Store
+
+# Local env
+.env
+.envrc
+!web/.envrc
+
+# Swift Package Manager
+.swiftpm/
+
+# GhosttyKit binary (built from ghostty submodule via scripts/setup.sh)
+GhosttyKit.xcframework
+GhosttyKit.xcframework.bak-*/
+
+# Release artifacts
+cmux-*.zip
+cmux-macos.dmg
+appcast.xml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.hypothesis/
+.vercel
+
+# Zig
+.zig-cache/
+zig-out/
+
+# Node
+node_modules/
+.next/
+
+# Test outputs
+tests/visual_output/
+tests/visual_report.html
+
+# Generated docs search index
+web/.pagefind-site/
+web/public/pagefind/
+
+# Local scratch (screenshots, etc.)
+tmp/
+tmp-*/

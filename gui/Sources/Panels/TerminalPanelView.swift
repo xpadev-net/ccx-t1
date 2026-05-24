@@ -1,0 +1,146 @@
+import SwiftUI
+import Foundation
+import AppKit
+import Bonsplit
+
+/// View for rendering a terminal panel
+struct TerminalPanelView: View {
+    @ObservedObject var panel: TerminalPanel
+    @AppStorage(NotificationPaneRingSettings.enabledKey)
+    private var notificationPaneRingEnabled = NotificationPaneRingSettings.defaultEnabled
+    @AppStorage(TerminalTextBoxInputSettings.maxLinesKey)
+    private var textBoxMaxLines = TerminalTextBoxInputSettings.defaultMaxLines
+    @State private var terminalFontSize = GhosttyConfig.load().fontSize
+    let paneId: PaneID
+    let isFocused: Bool
+    let isVisibleInUI: Bool
+    let portalPriority: Int
+    let isSplit: Bool
+    let appearance: PanelAppearance
+    let hasUnreadNotification: Bool
+    let terminalAgentContext: String
+    let onFocus: () -> Void
+    let onTriggerFlash: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Layering contract: terminal find UI is mounted in GhosttySurfaceScrollView (AppKit portal layer)
+            // via `searchState`. Rendering `SurfaceSearchOverlay` in this SwiftUI container can hide it.
+            GhosttyTerminalView(
+                terminalSurface: panel.surface,
+                paneId: paneId,
+                isActive: isFocused,
+                isVisibleInUI: isVisibleInUI,
+                portalZPriority: portalPriority,
+                showsInactiveOverlay: isSplit && !isFocused,
+                showsUnreadNotificationRing: hasUnreadNotification && notificationPaneRingEnabled,
+                inactiveOverlayColor: appearance.unfocusedOverlayNSColor,
+                inactiveOverlayOpacity: appearance.unfocusedOverlayOpacity,
+                searchState: panel.searchState,
+                reattachToken: panel.viewReattachToken,
+                onFocus: { _ in
+                    panel.terminalDidBecomeFocused()
+                    onFocus()
+                },
+                onTriggerFlash: onTriggerFlash
+            )
+            // Keep the NSViewRepresentable identity stable across bonsplit structural updates.
+            // This prevents transient teardown/recreate that can momentarily detach the hosted terminal view.
+            .id(panel.id)
+            .background(Color.clear)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .layoutPriority(1)
+
+            if panel.isTextBoxActive {
+                TextBoxInputContainer(
+                    text: $panel.textBoxContent,
+                    attachments: $panel.textBoxAttachments,
+                    surface: panel.surface,
+                    terminalBackgroundColor: appearance.backgroundColor,
+                    terminalForegroundColor: appearance.foregroundColor,
+                    terminalFont: NSFont.monospacedSystemFont(
+                        ofSize: terminalFontSize,
+                        weight: .regular
+                    ),
+                    maxLines: TerminalTextBoxInputSettings.resolvedMaxLines(textBoxMaxLines),
+                    terminalAgentContext: terminalAgentContext,
+                    onFocusTextBox: {
+                        panel.textBoxDidBecomeFocused()
+                        onFocus()
+                    },
+                    onToggleFocus: {
+                        _ = panel.focusTextBoxInputOrTerminal()
+                    },
+                    onEscape: {
+                        panel.handleTextBoxEscape()
+                    },
+                    onTextViewCreated: { view in
+                        panel.registerTextBoxInputView(view)
+                    },
+                    onTextViewMovedToWindow: { view in
+                        panel.textBoxInputViewDidMoveToWindow(view)
+                    },
+                    onTextViewDismantled: { view in
+                        panel.preserveTextBoxContentForUnmount(from: view)
+                    }
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onReceive(NotificationCenter.default.publisher(for: .ghosttyConfigDidReload)) { _ in
+            terminalFontSize = GhosttyConfig.load().fontSize
+        }
+    }
+}
+
+/// Shared appearance settings for panels
+struct PanelAppearance {
+    let backgroundColor: NSColor
+    let foregroundColor: NSColor
+    let dividerColor: Color
+    let unfocusedOverlayNSColor: NSColor
+    let unfocusedOverlayOpacity: Double
+    let usesClearContentBackground: Bool
+
+    var contentBackgroundColor: NSColor {
+        usesClearContentBackground ? .clear : backgroundColor
+    }
+
+    var drawsContentBackground: Bool {
+        !usesClearContentBackground
+    }
+
+    static func fromConfig(_ config: GhosttyConfig) -> PanelAppearance {
+        fromConfig(config, usesTransparentWindow: cmuxShouldUseTransparentBackgroundWindow())
+    }
+
+    static func fromConfig(_ config: GhosttyConfig, usesTransparentWindow: Bool) -> PanelAppearance {
+        let backgroundColor = GhosttyBackgroundTheme.color(
+            backgroundColor: config.backgroundColor,
+            opacity: config.backgroundOpacity
+        )
+        return PanelAppearance(
+            backgroundColor: backgroundColor,
+            foregroundColor: cmuxReadableForegroundNSColor(
+                preferred: config.foregroundColor,
+                on: backgroundColor
+            ),
+            dividerColor: Color(nsColor: config.resolvedSplitDividerColor),
+            unfocusedOverlayNSColor: config.unfocusedSplitOverlayFill,
+            unfocusedOverlayOpacity: config.unfocusedSplitOverlayOpacity,
+            usesClearContentBackground: shouldUseClearContentBackground(
+                opacity: config.backgroundOpacity,
+                usesGhosttyGlassStyle: config.backgroundBlur.isMacOSGlassStyle,
+                usesTransparentWindow: usesTransparentWindow
+            )
+        )
+    }
+
+    static func shouldUseClearContentBackground(
+        opacity: Double,
+        usesGhosttyGlassStyle: Bool,
+        usesTransparentWindow: Bool
+    ) -> Bool {
+        usesTransparentWindow || usesGhosttyGlassStyle || opacity < 0.999
+    }
+}
