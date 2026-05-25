@@ -67,7 +67,12 @@ final class CCXTaskSourceStore {
     }
 
     var canCreateWorkExecution: Bool {
-        snapshot != nil && selectedWorkItemCandidate != nil && !isCreatingWork
+        snapshot != nil
+            && selectedWorkItemCandidate != nil
+            && !isDirty
+            && !isLoading
+            && !isSaving
+            && !isCreatingWork
     }
 
     var loadedHash: String? {
@@ -156,7 +161,7 @@ final class CCXTaskSourceStore {
     }
 
     func createWorkExecutionFromSelection(project: CCXProjectSummary) async {
-        guard let candidate = selectedWorkItemCandidate, !isCreatingWork else { return }
+        guard canCreateWorkExecution, let candidate = selectedWorkItemCandidate else { return }
         isCreatingWork = true
         workCreateErrorMessage = nil
         workCreateStatusMessage = nil

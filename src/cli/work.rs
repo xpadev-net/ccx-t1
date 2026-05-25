@@ -1,16 +1,18 @@
+use camino::Utf8Path;
 use clap::Args;
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::config::{load_project_config, project_dir};
 use crate::domain::event::{
-    generate_id, Actor, Event, EventData, WorkExecutionCreatedPayload,
-    WorkExecutionStateChangedPayload, WorkExecutionTaskFileCreatedPayload,
+    generate_id, Actor, BranchCreatedPayload, Event, EventData, WorkExecutionCreatedPayload,
+    WorkExecutionStateChangedPayload, WorkExecutionTaskFileCreatedPayload, WorktreeCreatedPayload,
 };
 use crate::domain::work_execution::WorkExecutionState;
 use crate::error::CcxError;
 use crate::git::github::{execute_merge, MergeConfig};
-use crate::git::worktree::create_worktree;
-use crate::persistence::jsonl::append_event_to_dir;
+use crate::git::worktree::{create_worktree, remove_worktree};
+use crate::persistence::jsonl::append_events_to_dir;
 use crate::work::cleanup::{run_cleanup, CleanupConfig};
 
 // ---------------------------------------------------------------------------
@@ -45,28 +47,21 @@ pub fn create(args: CreateArgs) -> Result<(), CcxError> {
     let source_hash = hash_file(&args.source_path)?;
     std::fs::create_dir_all(&execution_dir)?;
     let now = chrono::Utc::now().to_rfc3339();
-    std::fs::write(
-        task_file.as_std_path(),
-        render_task_md(&TaskMdInput {
-            project_id: &args.project_id,
-            work_execution_id: &we_id,
-            source_path: &args.source_path,
-            selector_type: &args.selector_type,
-            selector_value: &args.selector_value,
-            display_text: &args.display_text,
-            branch: &branch,
-            updated_at: &now,
-        }),
-    )?;
-    create_worktree(
-        &config.canonical_repo,
-        &worktree,
-        &branch,
-        &args.project_id,
-        &we_id,
-        &project_dir,
-        &task_file,
-    )?;
+    let task_md = render_task_md(&TaskMdInput {
+        project_id: &args.project_id,
+        work_execution_id: &we_id,
+        source_path: &args.source_path,
+        selector_type: &args.selector_type,
+        selector_value: &args.selector_value,
+        display_text: &args.display_text,
+        branch: &branch,
+        updated_at: &now,
+    })?;
+    std::fs::write(task_file.as_std_path(), task_md)?;
+    if let Err(error) = create_worktree(&config.canonical_repo, &worktree, &branch, &task_file) {
+        cleanup_create_artifacts(&config.canonical_repo, &worktree, &branch, &execution_dir);
+        return Err(error);
+    }
 
     let created = Event::new(
         &args.project_id,
@@ -80,10 +75,9 @@ pub fn create(args: CreateArgs) -> Result<(), CcxError> {
             selector_type: args.selector_type.clone(),
             selector_value: args.selector_value.clone(),
             display_text: args.display_text.clone(),
-            source_file_hash: source_hash,
+            source_file_hash: source_hash.clone(),
         }),
     );
-    append_event_to_dir(&project_dir, &created)?;
     let task_file_created = Event::new(
         &args.project_id,
         Actor::Controller,
@@ -92,7 +86,6 @@ pub fn create(args: CreateArgs) -> Result<(), CcxError> {
             task_file_path: task_file.to_string(),
         }),
     );
-    append_event_to_dir(&project_dir, &task_file_created)?;
     let state_changed = Event::new(
         &args.project_id,
         Actor::Controller,
@@ -102,7 +95,36 @@ pub fn create(args: CreateArgs) -> Result<(), CcxError> {
             to: WorkExecutionState::TaskFileCreated,
         }),
     );
-    append_event_to_dir(&project_dir, &state_changed)?;
+    let branch_created = Event::new(
+        &args.project_id,
+        Actor::Controller,
+        EventData::BranchCreated(BranchCreatedPayload {
+            work_execution_id: we_id.clone(),
+            branch_name: branch.clone(),
+        }),
+    );
+    let worktree_created = Event::new(
+        &args.project_id,
+        Actor::Controller,
+        EventData::WorktreeCreated(WorktreeCreatedPayload {
+            work_execution_id: we_id.clone(),
+            worktree_path: worktree.to_string(),
+            branch_name: branch.clone(),
+        }),
+    );
+    if let Err(error) = append_events_to_dir(
+        &project_dir,
+        &[
+            created,
+            task_file_created,
+            state_changed,
+            branch_created,
+            worktree_created,
+        ],
+    ) {
+        cleanup_create_artifacts(&config.canonical_repo, &worktree, &branch, &execution_dir);
+        return Err(error);
+    }
 
     if args.json {
         println!(
@@ -134,23 +156,43 @@ struct TaskMdInput<'a> {
     updated_at: &'a str,
 }
 
-fn render_task_md(input: &TaskMdInput<'_>) -> String {
-    format!(
+#[derive(Serialize)]
+struct TaskMdFrontMatter<'a> {
+    project_id: &'a str,
+    work_execution_id: &'a str,
+    status: &'a str,
+    source_path: &'a str,
+    source_ref: String,
+    branch: &'a str,
+    pr_number: Option<u64>,
+    pr_url: Option<&'a str>,
+    head_commit: Option<&'a str>,
+    gh_review_hook_exit_code: Option<i32>,
+    current_writer_session_id: Option<&'a str>,
+    updated_by: &'a str,
+    updated_at: &'a str,
+}
+
+fn render_task_md(input: &TaskMdInput<'_>) -> Result<String, CcxError> {
+    let front_matter = TaskMdFrontMatter {
+        project_id: input.project_id,
+        work_execution_id: input.work_execution_id,
+        status: "assigned",
+        source_path: input.source_path,
+        source_ref: format!("{}:{}", input.selector_type, input.selector_value),
+        branch: input.branch,
+        pr_number: None,
+        pr_url: None,
+        head_commit: None,
+        gh_review_hook_exit_code: None,
+        current_writer_session_id: None,
+        updated_by: "orchestrator",
+        updated_at: input.updated_at,
+    };
+    let yaml = serde_yaml::to_string(&front_matter)?;
+    Ok(format!(
         r#"---
-project_id: {project_id}
-work_execution_id: {work_execution_id}
-status: assigned
-source_path: {source_path}
-source_ref: {selector_type}:{selector_value}
-branch: {branch}
-pr_number:
-pr_url:
-head_commit:
-gh_review_hook_exit_code:
-current_writer_session_id:
-updated_by: orchestrator
-updated_at: {updated_at}
----
+{yaml}---
 
 # Work Item
 
@@ -172,15 +214,8 @@ Implement the selected task source item within the WorkExecution boundaries.
 
 ## Blockers
 "#,
-        project_id = input.project_id,
-        work_execution_id = input.work_execution_id,
-        source_path = input.source_path,
-        selector_type = input.selector_type,
-        selector_value = input.selector_value,
-        branch = input.branch,
-        updated_at = input.updated_at,
         display_text = input.display_text,
-    )
+    ))
 }
 
 fn branch_slug(input: &str) -> String {
@@ -207,6 +242,20 @@ fn hash_file(path: &str) -> Result<String, CcxError> {
     let content = std::fs::read(path)
         .map_err(|e| CcxError::Other(anyhow::anyhow!("failed to read source file {path}: {e}")))?;
     Ok(format!("{:x}", Sha256::digest(&content)))
+}
+
+fn cleanup_create_artifacts(
+    repo: &Utf8Path,
+    worktree: &Utf8Path,
+    branch: &str,
+    execution_dir: &Utf8Path,
+) {
+    let _ = remove_worktree(repo, worktree);
+    let _ = std::process::Command::new("git")
+        .args(["branch", "-D", branch])
+        .current_dir(repo)
+        .output();
+    let _ = std::fs::remove_dir_all(execution_dir);
 }
 
 // ---------------------------------------------------------------------------

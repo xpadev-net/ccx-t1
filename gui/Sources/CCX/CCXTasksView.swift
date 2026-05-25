@@ -232,6 +232,13 @@ private struct CCXTaskSourcePanel: View {
                 }
                 .disabled(sourceStore.workItemCandidates.isEmpty || sourceStore.isCreatingWork || !status.canOpen)
 
+                if sourceStore.isDirty {
+                    Text(String(localized: "ccx.tasks.workCreate.unsaved",
+                                defaultValue: "Save or discard unsaved changes before creating a WorkExecution."))
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                }
+
                 if let status = sourceStore.workCreateStatusMessage {
                     Text(status)
                         .font(.callout)

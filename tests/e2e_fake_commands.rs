@@ -482,7 +482,7 @@ fn work_create_materializes_execution_task_file_and_worktree() {
         .output()
         .unwrap();
     let tasks = repo.join("tasks.md");
-    std::fs::write(&tasks, "# Phase\n- [ ] Build work create\n").unwrap();
+    std::fs::write(&tasks, "# Phase\n- [ ] Fix: crash #42\n").unwrap();
     let project_id = register_project(&home, &repo, &tasks);
 
     let (code, stdout, stderr) = run_ccx(
@@ -496,9 +496,9 @@ fn work_create_materializes_execution_task_file_and_worktree() {
             "--selector-type",
             "checkbox",
             "--selector-value",
-            "L2:- [ ] Build work create",
+            "L2:- [ ] Fix: crash #42",
             "--display-text",
-            "Build work create",
+            "Fix: crash #42",
             "--json",
         ],
         &[],
@@ -515,16 +515,45 @@ fn work_create_materializes_execution_task_file_and_worktree() {
     assert!(worktree_path.join(".ccx-task.md").exists());
     let task_md = std::fs::read_to_string(&task_file_path).unwrap();
     assert!(task_md.contains("status: assigned"));
-    assert!(task_md.contains("Build work create"));
+    assert!(task_md.contains("Fix: crash #42"));
+    let front_matter = task_md
+        .strip_prefix("---\n")
+        .and_then(|rest| rest.split_once("---\n"))
+        .map(|(yaml, _)| yaml)
+        .expect("task.md should contain YAML front matter");
+    let parsed_front_matter: serde_yaml::Value =
+        serde_yaml::from_str(front_matter).expect("front matter should be valid YAML");
+    assert_eq!(
+        parsed_front_matter["source_ref"].as_str(),
+        Some("checkbox:L2:- [ ] Fix: crash #42")
+    );
 
     let events_raw =
         std::fs::read_to_string(home.join("projects").join(&project_id).join("events.jsonl"))
             .unwrap();
-    assert!(events_raw.contains("work_execution_created"));
-    assert!(events_raw.contains("work_execution_task_file_created"));
-    assert!(events_raw.contains("work_execution_state_changed"));
-    assert!(events_raw.contains("branch_created"));
-    assert!(events_raw.contains("worktree_created"));
+    let event_types: Vec<String> = events_raw
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .map(|event| event["event_type"].as_str().unwrap().to_string())
+        .collect();
+    let created_at = event_types
+        .iter()
+        .position(|event_type| event_type == "work_execution_created")
+        .unwrap();
+    let branch_at = event_types
+        .iter()
+        .position(|event_type| event_type == "branch_created")
+        .unwrap();
+    let worktree_at = event_types
+        .iter()
+        .position(|event_type| event_type == "worktree_created")
+        .unwrap();
+    assert!(
+        created_at < branch_at && created_at < worktree_at,
+        "WorkExecutionCreated should precede child artifact events: {event_types:?}"
+    );
+    assert!(event_types.contains(&"work_execution_task_file_created".to_string()));
+    assert!(event_types.contains(&"work_execution_state_changed".to_string()));
 
     let db =
         rusqlite::Connection::open(home.join("projects").join(&project_id).join("state.sqlite"))

@@ -13,6 +13,13 @@ use crate::error::CcxError;
 /// Uses `events.lock` (a separate sentinel file) for exclusive access so the
 /// data file is always opened in append-only mode.
 pub fn append_event_to_dir(dir: &Utf8Path, event: &Event) -> Result<(), CcxError> {
+    append_events_to_dir(dir, std::slice::from_ref(event))
+}
+
+/// Append multiple `Event`s as JSON lines to `events.jsonl` inside `dir`
+/// while holding one exclusive lock. Projection still runs after the durable
+/// append, preserving JSONL as the source of truth.
+pub fn append_events_to_dir(dir: &Utf8Path, events: &[Event]) -> Result<(), CcxError> {
     std::fs::create_dir_all(dir)?;
 
     let lock_path = dir.join("events.lock");
@@ -27,17 +34,18 @@ pub fn append_event_to_dir(dir: &Utf8Path, event: &Event) -> Result<(), CcxError
     let mut rw_lock = RwLock::new(lock_file);
     let _guard = rw_lock.write()?;
 
-    // Serialize to JSON (single line, no pretty-printing).
-    let mut line = serde_json::to_string(event)?;
-    line.push('\n');
-
     // Open the JSONL file in append mode (create if absent).
     let mut log_file = OpenOptions::new()
         .create(true)
         .append(true)
         .open(&log_path)?;
 
-    log_file.write_all(line.as_bytes())?;
+    for event in events {
+        // Serialize to JSON (single line, no pretty-printing).
+        let mut line = serde_json::to_string(event)?;
+        line.push('\n');
+        log_file.write_all(line.as_bytes())?;
+    }
     log_file.flush()?;
     log_file.sync_all()?;
 
@@ -46,7 +54,9 @@ pub fn append_event_to_dir(dir: &Utf8Path, event: &Event) -> Result<(), CcxError
     drop(_guard);
 
     // Best-effort SQLite projection — JSONL write already succeeded.
-    crate::persistence::projector::try_project_event(dir, event);
+    for event in events {
+        crate::persistence::projector::try_project_event(dir, event);
+    }
 
     Ok(())
 }
@@ -143,10 +153,7 @@ pub fn read_events_from_dir(dir: &Utf8Path) -> Result<Vec<Event>, CcxError> {
             continue;
         }
         let event: Event = serde_json::from_str(line).map_err(|e| {
-            CcxError::Database(format!(
-                "events.jsonl:{}: invalid JSON: {e}",
-                line_no + 1
-            ))
+            CcxError::Database(format!("events.jsonl:{}: invalid JSON: {e}", line_no + 1))
         })?;
         events.push(event);
     }

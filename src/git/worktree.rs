@@ -1,21 +1,14 @@
 use camino::Utf8Path;
 
-use crate::domain::event::{Actor, BranchCreatedPayload, Event, EventData, WorktreeCreatedPayload};
 use crate::error::CcxError;
-use crate::persistence::jsonl::append_event_to_dir;
 
 /// Create a git worktree at `worktree_path` on a new branch `branch_name`,
 /// then place an absolute symlink `.ccx-task.md` inside the worktree that
 /// points to the canonical `task_md_path`.
-///
-/// Appends `BranchCreated` then `WorktreeCreated` events to the project log.
 pub fn create_worktree(
     repo: &Utf8Path,
     worktree_path: &Utf8Path,
     branch_name: &str,
-    project_id: &str,
-    work_execution_id: &str,
-    project_dir: &Utf8Path,
     task_md_path: &Utf8Path,
 ) -> Result<(), CcxError> {
     let output = std::process::Command::new("git")
@@ -37,27 +30,6 @@ pub fn create_worktree(
     let symlink_path = worktree_path.join(".ccx-task.md");
     std::os::unix::fs::symlink(task_md_path.as_std_path(), symlink_path.as_std_path())
         .map_err(|e| CcxError::Io(e))?;
-
-    let branch_event = Event::new(
-        project_id,
-        Actor::Controller,
-        EventData::BranchCreated(BranchCreatedPayload {
-            work_execution_id: work_execution_id.to_string(),
-            branch_name: branch_name.to_string(),
-        }),
-    );
-    append_event_to_dir(project_dir, &branch_event)?;
-
-    let worktree_event = Event::new(
-        project_id,
-        Actor::Controller,
-        EventData::WorktreeCreated(WorktreeCreatedPayload {
-            work_execution_id: work_execution_id.to_string(),
-            worktree_path: worktree_path.to_string(),
-            branch_name: branch_name.to_string(),
-        }),
-    );
-    append_event_to_dir(project_dir, &worktree_event)?;
 
     Ok(())
 }
@@ -109,23 +81,9 @@ mod tests {
         let tmp_wt = tempfile::tempdir().unwrap();
         let wt_path = camino::Utf8PathBuf::try_from(tmp_wt.path().join("wt")).unwrap();
 
-        let tmp_proj = tempfile::tempdir().unwrap();
-        let proj_dir = camino::Utf8PathBuf::try_from(tmp_proj.path().to_path_buf()).unwrap();
-
         let task_md = repo.join("README");
-        let pid = "01JTEST00000000000000000001";
-        let we_id = "01JTEST00000000000000000002";
 
-        create_worktree(
-            &repo,
-            &wt_path,
-            "ccx/test-branch",
-            pid,
-            we_id,
-            &proj_dir,
-            &task_md,
-        )
-        .unwrap();
+        create_worktree(&repo, &wt_path, "ccx/test-branch", &task_md).unwrap();
 
         assert!(wt_path.exists(), "worktree dir should exist");
         assert!(
@@ -153,20 +111,9 @@ mod tests {
         let tmp_wt = tempfile::tempdir().unwrap();
         let wt_path = camino::Utf8PathBuf::try_from(tmp_wt.path().join("wt")).unwrap();
 
-        let tmp_proj = tempfile::tempdir().unwrap();
-        let proj_dir = camino::Utf8PathBuf::try_from(tmp_proj.path().to_path_buf()).unwrap();
         let task_md = repo.join("README");
 
-        create_worktree(
-            &repo,
-            &wt_path,
-            "ccx/remove-test",
-            "pid",
-            "we_id",
-            &proj_dir,
-            &task_md,
-        )
-        .unwrap();
+        create_worktree(&repo, &wt_path, "ccx/remove-test", &task_md).unwrap();
         assert!(wt_path.exists());
 
         remove_worktree(&repo, &wt_path).unwrap();

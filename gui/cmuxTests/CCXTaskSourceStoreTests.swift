@@ -628,6 +628,18 @@ final class CCXTaskSourceStoreTests: XCTestCase {
         let store = CCXTaskSourceStore(projectId: "p_123") {
             .success(Self.cli { _, arguments, stdin in
                 calls.append(arguments)
+                if arguments.contains("read") {
+                    return .success(Self.result(stdout: """
+                    {
+                      "project_id": "p_123",
+                      "path": "/repo/z/tasks.md",
+                      "content": "- [ ] Build create flow\\n",
+                      "hash": "hash-1",
+                      "mtime": "2026-05-26T00:00:00Z",
+                      "warning": null
+                    }
+                    """))
+                }
                 if arguments.contains("create") {
                     return .success(Self.result(stdout: """
                     {
@@ -658,20 +670,51 @@ final class CCXTaskSourceStoreTests: XCTestCase {
                 """))
             })
         }
-        store.draftContent = "- [ ] Build create flow\n"
+        await store.load()
 
         await store.createWorkExecutionFromSelection(project: Self.project)
 
         XCTAssertEqual(calls.map { Array($0.prefix(2)) }, [
+            ["task-source", "read"],
             ["work", "create"],
             ["agent", "attach"],
             ["agent", "prompt"],
         ])
-        XCTAssertTrue(calls[0].contains("checkbox"))
-        XCTAssertTrue(calls[0].contains("Build create flow"))
+        XCTAssertTrue(calls[1].contains("checkbox"))
+        XCTAssertTrue(calls[1].contains("Build create flow"))
         XCTAssertTrue(promptedMessage?.contains("we_1") ?? false)
         XCTAssertNotNil(store.workCreateStatusMessage)
         XCTAssertNil(store.workCreateErrorMessage)
+    }
+
+    func testCreateWorkExecutionDoesNotUseUnsavedDraftCandidate() async {
+        var calls: [[String]] = []
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, arguments, _ in
+                calls.append(arguments)
+                return .success(Self.result(stdout: """
+                {
+                  "project_id": "p_123",
+                  "path": "/repo/z/tasks.md",
+                  "content": "- [ ] Saved item\\n",
+                  "hash": "hash-1",
+                  "mtime": "2026-05-26T00:00:00Z",
+                  "warning": null
+                }
+                """))
+            })
+        }
+
+        await store.load()
+        store.draftContent = "- [ ] Unsaved item\n"
+        await store.createWorkExecutionFromSelection(project: Self.project)
+
+        XCTAssertTrue(store.isDirty)
+        XCTAssertFalse(store.canCreateWorkExecution)
+        XCTAssertEqual(calls, [
+            ["task-source", "read", "--project-id", "p_123", "--json"],
+        ])
+        XCTAssertNil(store.workCreateStatusMessage)
     }
 
     private static func cli(
