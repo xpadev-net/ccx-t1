@@ -2,7 +2,7 @@ import Foundation
 import os
 import SwiftUI
 
-private let ccxTaskSourceLogger = Logger(
+nonisolated private let ccxTaskSourceLogger = Logger(
     subsystem: "com.cmuxterm.ccx",
     category: "CCXTaskSource"
 )

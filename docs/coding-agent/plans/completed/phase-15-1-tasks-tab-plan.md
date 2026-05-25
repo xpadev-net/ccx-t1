@@ -55,6 +55,7 @@ Research waived: local targeted discovery already identified the dashboard and p
 - 2026-05-26: Fourth `gh-review-hook` pass reported Reveal in Finder selecting parent folders for existing invalid task-source paths and requested splitting `CCXTaskSourceFileStatus` out of `CCXDashboardView.swift`.
 - 2026-05-26: Added an `existsOnDisk` reveal predicate, moved `CCXTaskSourceFileStatus` to its own Swift file, and registered the new file in the Xcode project.
 - 2026-05-26: Fifth `gh-review-hook` pass reported public logging of filesystem error descriptions; changed the logged error description privacy to private.
+- 2026-05-26: Sixth `gh-review-hook` pass reported a missing nonisolated logger annotation and dashboard file-length budget crossing; annotated the logger and extracted the Tasks tab into `CCXTasksView.swift`.
 
 ## Decision Log
 
