@@ -2376,6 +2376,42 @@ final class WorkspaceCustomDescriptionTests: XCTestCase {
         XCTAssertFalse(workspace.hasCustomDescription)
     }
 }
+
+@MainActor
+final class WorkspaceCCXDashboardSwitchTests: XCTestCase {
+    func testSwitchToCCXDashboardReplacesExistingDashboardPanel() throws {
+        let workspace = Workspace()
+        let paneId = try XCTUnwrap(workspace.bonsplitController.focusedPaneId)
+        let pickerPanel = try XCTUnwrap(workspace.newCCXDashboardSurface(
+            inPane: paneId,
+            projectId: nil,
+            focus: true,
+            origin: "test"
+        ))
+        let pickerTabId = try XCTUnwrap(workspace.surfaceIdFromPanelId(pickerPanel.id))
+        let panelCountBeforeSwitch = workspace.panels.count
+
+        let projectPanel = try XCTUnwrap(workspace.switchToCCXDashboard(projectId: "p_123", origin: "test"))
+
+        XCTAssertNil(workspace.panels[pickerPanel.id])
+        XCTAssertEqual(workspace.panels.count, panelCountBeforeSwitch)
+        XCTAssertEqual(workspace.surfaceIdFromPanelId(projectPanel.id), pickerTabId)
+        XCTAssertEqual(workspace.panelIdFromSurfaceId(pickerTabId), projectPanel.id)
+        XCTAssertEqual(projectPanel.projectStore?.projectId, "p_123")
+    }
+
+    func testSwitchToCCXDashboardFallsBackToOpeningDashboardWhenNoneExists() throws {
+        let workspace = Workspace()
+        let panelCountBeforeSwitch = workspace.panels.count
+
+        let projectPanel = try XCTUnwrap(workspace.switchToCCXDashboard(projectId: "p_456", origin: "test"))
+
+        XCTAssertEqual(workspace.panels.count, panelCountBeforeSwitch + 1)
+        XCTAssertEqual(projectPanel.projectStore?.projectId, "p_456")
+        XCTAssertNotNil(workspace.surfaceIdFromPanelId(projectPanel.id))
+    }
+}
+
 final class WorkspacePlacementSettingsTests: XCTestCase {
     func testCurrentPlacementDefaultsToAfterCurrentWhenUnset() {
         let suiteName = "WorkspacePlacementSettingsTests.Default.\(UUID().uuidString)"
