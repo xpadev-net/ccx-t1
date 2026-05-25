@@ -119,7 +119,7 @@ private struct CCXProjectSwitchMenu: View {
                     Button {
                         onOpenProject(project)
                     } label: {
-                        Text(project.displaySlug)
+                        Text(project.displaySlug.isEmpty ? project.projectId : project.displaySlug)
                     }
                     .disabled(project.projectId == currentProjectId)
                 }
