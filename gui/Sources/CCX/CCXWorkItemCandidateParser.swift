@@ -1,5 +1,12 @@
 import Foundation
 
+struct CCXTaskSourceWorkItemCandidate: Identifiable, Hashable, Sendable {
+    let id: String
+    let selectorType: String
+    let selectorValue: String
+    let displayText: String
+}
+
 enum CCXWorkItemCandidateParser {
     static func parse(_ markdown: String) -> [CCXTaskSourceWorkItemCandidate] {
         var occurrenceCounts: [String: Int] = [:]

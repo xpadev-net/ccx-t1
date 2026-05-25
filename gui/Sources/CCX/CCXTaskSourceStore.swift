@@ -451,11 +451,13 @@ final class CCXTaskSourceStore {
     }
 
     private static func workCreatePartialStatus(created: CCXWorkCreateResult) -> String {
-        let prefix = String(
+        let format = String(
             localized: "ccx.tasks.workCreate.partial.created",
-            defaultValue: "Created WorkExecution. Attach or prompt the Worker manually if retry does not recover:"
+            defaultValue: "Created WorkExecution. Attach or prompt the Worker manually if retry does not recover: %@",
+            bundle: .main,
+            comment: "WorkExecution created but subsequent step failed; placeholder is the WorkExecution ID."
         )
-        return "\(prefix) \(created.workExecutionId)"
+        return String(format: format, locale: .current, created.workExecutionId)
     }
 
     private static func workCreateAttachMessage(for error: Error) -> String {
@@ -491,11 +493,4 @@ final class CCXTaskSourceStore {
         return String(localized: "ccx.tasks.workCreate.error.recover",
                       defaultValue: "Retry to continue from the created WorkExecution, or attach and prompt a Worker manually.")
     }
-}
-
-struct CCXTaskSourceWorkItemCandidate: Identifiable, Hashable, Sendable {
-    let id: String
-    let selectorType: String
-    let selectorValue: String
-    let displayText: String
 }
