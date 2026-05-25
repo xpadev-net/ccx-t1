@@ -14,11 +14,11 @@ Verify the production GitHub loop against the real repository rather than fake `
 
 ## Evidence
 
-- 2026-05-25: PR #40 (`codex/task-14-8-device-verification`) was created against `xpadev-net/ccx-t1`.
+- 2026-05-25: [PR #40](https://github.com/xpadev-net/ccx-t1/pull/40) (`codex/task-14-8-device-verification`) was created against `xpadev-net/ccx-t1`.
 - `gh-review-hook` initially returned exit 2 with two actionable Greptile review issues in `gui/Sources/CCX/CCXDashboardView.swift`.
-- The review issues were fixed in follow-up commit `1391565f` (`Clarify CCX dashboard store lifecycle`), then pushed to the PR branch.
+- The review issues were fixed in follow-up commit [`1391565f`](https://github.com/xpadev-net/ccx-t1/commit/1391565f4860c68a825c2ca9209c253dbe6a126f) (`Clarify CCX dashboard store lifecycle`), then pushed to the PR branch.
 - A reviewer subagent approved the hook-fix diff with no actionable findings.
-- `gh-review-hook` was rerun after the push and exited 0 after Greptile completed successfully and CodeRabbit was already successful.
+- `gh-review-hook` was rerun after the push and exited 0 after [Greptile Review](https://greptile.com/) completed successfully and CodeRabbit was already successful on [PR #40](https://github.com/xpadev-net/ccx-t1/pull/40).
 - PR #40 was merged successfully with `gh pr merge 40 --squash --delete-branch`.
 - Local `master` was checked out by the merge command, fast-forwarded to `origin/master`, and `git pull --ff-only` reported `Already up to date`.
 
