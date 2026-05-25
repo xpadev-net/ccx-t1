@@ -60,6 +60,8 @@
 - 2026-05-25: Targeted `xcodebuild` for `cmuxTests/CCXProjectPickerTests` compiled the touched Swift files but stopped before test execution with existing checkout dependency error: `Ghostty submodule is missing at /Users/xpadev/IdeaProjects/ccx-t1/gui/ghostty`.
 - 2026-05-25: Reviewer requested explicit SwiftUI tracking for `CCXProjectsStore`; updated picker and project switch menu to hold the store with `@Bindable`.
 - 2026-05-25: Reviewer subagent approved the updated change set.
+- 2026-05-25: `gh-review-hook` requested preserving the launch intent guard and removing internal milestone copy. Added `CCXLaunchArguments.isCCXLaunch`, gated bridge presentation on CCX flags, covered parsing with tests, and changed placeholder text to user-facing copy.
+- 2026-05-25: Hook-fix validation passed: `rtk plutil -lint gui/cmux.xcodeproj/project.pbxproj`; `rtk bash gui/scripts/lint-pbxproj-test-wiring.sh --repo-root gui`; localization JSON parse; `git diff --check`. Targeted `xcodebuild` again compiled touched Swift files and stopped before test execution on the existing missing `gui/ghostty` checkout dependency.
 
 ## Decision Log
 

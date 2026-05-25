@@ -9,6 +9,27 @@ import XCTest
 
 @MainActor
 final class CCXProjectPickerTests: XCTestCase {
+    func testLaunchArgumentsDoNotRequestCCXForOrdinaryLaunch() {
+        let args = CCXLaunchArguments.parse(["cmux"])
+
+        XCTAssertFalse(args.isCCXLaunch)
+        XCTAssertNil(args.projectId)
+    }
+
+    func testLaunchArgumentsRequestPickerWithCCXFlag() {
+        let args = CCXLaunchArguments.parse(["cmux", "--ccx"])
+
+        XCTAssertTrue(args.isCCXLaunch)
+        XCTAssertNil(args.projectId)
+    }
+
+    func testLaunchArgumentsRequestDashboardWithProjectId() {
+        let args = CCXLaunchArguments.parse(["cmux", "--project-id", "p_1"])
+
+        XCTAssertTrue(args.isCCXLaunch)
+        XCTAssertEqual(args.projectId, "p_1")
+    }
+
     func testPanelWithoutProjectUsesPickerMode() {
         let panel = CCXDashboardPanel(projectId: nil, ccxHome: temporaryHome())
 

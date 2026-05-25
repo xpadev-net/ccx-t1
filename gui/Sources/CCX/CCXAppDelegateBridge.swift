@@ -20,6 +20,7 @@ import Foundation
 enum CCXAppDelegateBridge {
     static func presentDashboardIfRequested(on appDelegate: AppDelegate) {
         let args = CCXLaunchArguments.parse()
+        guard args.isCCXLaunch else { return }
         appDelegate.openCCXDashboardInPreferredMainWindow(
             projectId: args.projectId?.isEmpty == false ? args.projectId : nil,
             debugSource: "ccxLaunchArgs"

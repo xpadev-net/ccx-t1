@@ -126,7 +126,7 @@ public struct CCXProjectPickerView: View {
                 .font(.title2)
                 .fontWeight(.semibold)
             Text(String(localized: "ccx.projectPicker.addProjectPlaceholder",
-                        defaultValue: "Project registration will be implemented in P14.4."))
+                        defaultValue: "Project registration is coming soon."))
                 .foregroundStyle(.secondary)
             Button(String(localized: "ccx.common.close", defaultValue: "Close")) {
                 isAddProjectPresented = false
