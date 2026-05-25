@@ -3,7 +3,8 @@ import Foundation
 nonisolated public struct CCXControllerCLI {
     public typealias Runner = (
         _ executableURL: URL,
-        _ arguments: [String]
+        _ arguments: [String],
+        _ stdin: Data?
     ) async throws -> CCXControllerCLIProcessResult
     typealias TimeoutWaiter = () async throws -> Void
 
@@ -14,10 +15,11 @@ nonisolated public struct CCXControllerCLI {
 
     public init(executableURL: URL) {
         self.executableURL = executableURL
-        self.runner = { executableURL, arguments in
+        self.runner = { executableURL, arguments, stdin in
             try await CCXControllerCLI.runProcess(
                 executableURL: executableURL,
-                arguments: arguments
+                arguments: arguments,
+                stdin: stdin
             )
         }
     }
@@ -35,10 +37,11 @@ nonisolated public struct CCXControllerCLI {
         timeoutWaiter: @escaping TimeoutWaiter
     ) {
         self.executableURL = executableURL
-        self.runner = { executableURL, arguments in
+        self.runner = { executableURL, arguments, stdin in
             try await CCXControllerCLI.runProcess(
                 executableURL: executableURL,
                 arguments: arguments,
+                stdin: stdin,
                 timeoutWaiter: timeoutWaiter
             )
         }
@@ -88,7 +91,7 @@ nonisolated public struct CCXControllerCLI {
             canonicalRepo.path,
             "--task-source-file",
             taskSourceFile.path,
-        ])
+        ], nil)
         let stdout = string(from: result.stdout)
         let stderr = string(from: result.stderr)
         guard result.exitCode == 0 else {
@@ -116,7 +119,7 @@ nonisolated public struct CCXControllerCLI {
         if purge {
             arguments.append("--purge")
         }
-        let result = try await runner(executableURL, arguments)
+        let result = try await runner(executableURL, arguments, nil)
         let stdout = string(from: result.stdout)
         let stderr = string(from: result.stderr)
         guard result.exitCode == 0 else {
@@ -128,9 +131,78 @@ nonisolated public struct CCXControllerCLI {
         }
     }
 
+    public func readTaskSource(projectId: String) async throws -> CCXTaskSourceSnapshot {
+        let result = try await runner(executableURL, [
+            "task-source",
+            "read",
+            "--project-id",
+            projectId,
+            "--json",
+        ], nil)
+        return try decodeJSONResult(result, as: CCXTaskSourceSnapshot.self)
+    }
+
+    public func writeTaskSource(
+        projectId: String,
+        expectedHash: String,
+        content: String
+    ) async throws -> CCXTaskSourceWriteResult {
+        let result = try await runner(executableURL, [
+            "task-source",
+            "write",
+            "--project-id",
+            projectId,
+            "--expected-hash",
+            expectedHash,
+            "--stdin",
+            "--json",
+        ], Data(content.utf8))
+        return try decodeJSONResult(result, as: CCXTaskSourceWriteResult.self)
+    }
+
+    public func appendTaskSource(
+        projectId: String,
+        expectedHash: String,
+        content: String
+    ) async throws -> CCXTaskSourceAppendResult {
+        let result = try await runner(executableURL, [
+            "task-source",
+            "append",
+            "--project-id",
+            projectId,
+            "--expected-hash",
+            expectedHash,
+            "--stdin",
+            "--json",
+        ], Data(content.utf8))
+        return try decodeJSONResult(result, as: CCXTaskSourceAppendResult.self)
+    }
+
+    private func decodeJSONResult<T: Decodable>(
+        _ result: CCXControllerCLIProcessResult,
+        as type: T.Type
+    ) throws -> T {
+        let stdout = string(from: result.stdout)
+        let stderr = string(from: result.stderr)
+        guard result.exitCode == 0 else {
+            throw CCXControllerCLIError.processFailed(
+                exitCode: result.exitCode,
+                stdout: stdout,
+                stderr: stderr
+            )
+        }
+
+        do {
+            return try JSONDecoder().decode(T.self, from: result.stdout)
+        } catch {
+            throw CCXControllerCLIError.invalidJSON(stdout)
+        }
+    }
+
     private static func runProcess(
         executableURL: URL,
         arguments: [String],
+        stdin: Data? = nil,
         timeoutWaiter: @escaping TimeoutWaiter = defaultTimeoutWaiter
     ) async throws -> CCXControllerCLIProcessResult {
         let cancellation = ProcessCancellation()
@@ -142,6 +214,7 @@ nonisolated public struct CCXControllerCLI {
 
                 let stdoutPipe = Pipe()
                 let stderrPipe = Pipe()
+                let stdinPipe = stdin.map { _ in Pipe() }
                 let output = ProtectedProcessOutput()
                 let completion = ProcessCompletion(
                     continuation: continuation,
@@ -153,6 +226,9 @@ nonisolated public struct CCXControllerCLI {
                 cancellation.set(completion)
                 process.standardOutput = stdoutPipe
                 process.standardError = stderrPipe
+                if let stdinPipe {
+                    process.standardInput = stdinPipe
+                }
 
                 stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
                     output.appendStdout(handle.availableData)
@@ -197,6 +273,10 @@ nonisolated public struct CCXControllerCLI {
                         return
                     }
                     try process.run()
+                    if let stdin, let stdinPipe {
+                        stdinPipe.fileHandleForWriting.write(stdin)
+                        try? stdinPipe.fileHandleForWriting.close()
+                    }
                     _ = completion.finishIfCancellationRequestedAfterLaunch()
                 } catch {
                     if completion.finishIfCancellationRequestedAfterLaunch() {
@@ -293,8 +373,11 @@ public enum CCXControllerCLIError: Error, Equatable, LocalizedError {
             )
         case .processFailed(let exitCode, _, _):
             return String(
-                localized: "ccx.controller.processFailed",
-                defaultValue: "CCX controller CLI failed (exit code \(exitCode))."
+                format: String(
+                    localized: "ccx.controller.processFailed",
+                    defaultValue: "CCX controller CLI failed (exit code %lld)."
+                ),
+                Int64(exitCode)
             )
         case .invalidJSON:
             return String(

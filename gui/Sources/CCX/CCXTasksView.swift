@@ -27,10 +27,12 @@ public struct CCXTasksView: View {
 private struct CCXTaskSourcePanel: View {
     let project: CCXProjectSummary
     @State private var status: CCXTaskSourceFileStatus
+    @StateObject private var sourceStore: CCXTaskSourceStore
 
     init(project: CCXProjectSummary) {
         self.project = project
         self._status = State(initialValue: CCXTaskSourceFileStatus.checking(path: project.taskSourceFile))
+        self._sourceStore = StateObject(wrappedValue: CCXTaskSourceStore(projectId: project.projectId))
     }
 
     var body: some View {
@@ -64,7 +66,75 @@ private struct CCXTaskSourcePanel: View {
                     .textSelection(.enabled)
             }
 
+            if let warning = sourceStore.warningMessage {
+                Text(warning)
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+                    .textSelection(.enabled)
+            }
+
+            if let error = sourceStore.errorMessage {
+                Text(error)
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+            }
+
+            if let conflict = sourceStore.conflictMessage {
+                Text(conflict)
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+                    .textSelection(.enabled)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(String(localized: "ccx.tasks.editor.title", defaultValue: "Markdown"))
+                        .font(.headline)
+                    Spacer(minLength: 12)
+                    if sourceStore.isDirty {
+                        Text(String(localized: "ccx.tasks.editor.unsaved", defaultValue: "Unsaved"))
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
+                TextEditor(text: $sourceStore.draftContent)
+                    .font(.system(.body, design: .monospaced))
+                    .scrollContentBackground(.hidden)
+                    .frame(minHeight: 320)
+                    .background(.background, in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(.separator.opacity(0.7))
+                    )
+                    .disabled(sourceStore.isLoading || sourceStore.isSaving || !status.canOpen)
+            }
+
             HStack(spacing: 8) {
+                Button {
+                    Task { await sourceStore.save() }
+                } label: {
+                    Label(String(localized: "ccx.tasks.action.save", defaultValue: "Save"),
+                          systemImage: "square.and.arrow.down")
+                }
+                .disabled(!sourceStore.canSave || !status.canOpen)
+
+                Button {
+                    Task { await sourceStore.reload() }
+                } label: {
+                    Label(String(localized: "ccx.tasks.action.reload", defaultValue: "Reload"),
+                          systemImage: "arrow.clockwise")
+                }
+                .disabled(sourceStore.isLoading || sourceStore.isSaving)
+
+                Button {
+                    sourceStore.discardChanges()
+                } label: {
+                    Label(String(localized: "ccx.tasks.action.discard", defaultValue: "Discard"),
+                          systemImage: "xmark.circle")
+                }
+                .disabled(!sourceStore.isDirty || sourceStore.isLoading || sourceStore.isSaving)
+
                 Button {
                     openTaskSource()
                 } label: {
@@ -95,6 +165,9 @@ private struct CCXTaskSourcePanel: View {
         .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
         .task(id: project.taskSourceFile) {
             await refreshStatus(for: project.taskSourceFile)
+            if status.canOpen {
+                await sourceStore.load()
+            }
         }
     }
 

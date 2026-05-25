@@ -314,7 +314,7 @@ final class CCXProjectPickerTests: XCTestCase {
         }
         """.data(using: .utf8)!
         var capturedArguments: [String] = []
-        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, arguments in
+        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, arguments, _ in
             capturedArguments = arguments
             return CCXControllerCLIProcessResult(exitCode: 0, stdout: stdout, stderr: Data())
         }
@@ -343,7 +343,7 @@ final class CCXProjectPickerTests: XCTestCase {
 
     func testControllerCLIUnregisterUsesProjectIdArgument() async throws {
         var capturedArguments: [String] = []
-        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, arguments in
+        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, arguments, _ in
             capturedArguments = arguments
             return CCXControllerCLIProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
         }
@@ -360,7 +360,7 @@ final class CCXProjectPickerTests: XCTestCase {
 
     func testControllerCLIUnregisterAddsPurgeFlag() async throws {
         var capturedArguments: [String] = []
-        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, arguments in
+        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, arguments, _ in
             capturedArguments = arguments
             return CCXControllerCLIProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
         }
@@ -385,7 +385,7 @@ final class CCXProjectPickerTests: XCTestCase {
             createdAt: "2026-05-25T00:00:00Z"
         )
         var capturedArguments: [String] = []
-        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, arguments in
+        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, arguments, _ in
             capturedArguments = arguments
             return CCXControllerCLIProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
         }
@@ -414,7 +414,7 @@ final class CCXProjectPickerTests: XCTestCase {
             taskSourceFile: "/repo/z/tasks.md",
             createdAt: "2026-05-25T00:00:00Z"
         )
-        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, _ in
+        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, _, _ in
             CCXControllerCLIProcessResult(
                 exitCode: 2,
                 stdout: Data("private output".utf8),
@@ -448,7 +448,7 @@ final class CCXProjectPickerTests: XCTestCase {
             createdAt: "2026-05-25T00:00:00Z"
         )
         var capturedArguments: [String] = []
-        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, arguments in
+        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, arguments, _ in
             capturedArguments = arguments
             return CCXControllerCLIProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
         }
@@ -476,7 +476,7 @@ final class CCXProjectPickerTests: XCTestCase {
             withIntermediateDirectories: true
         )
         let taskSource = try makeFile(named: "tasks.md", in: repo)
-        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, _ in
+        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, _, _ in
             CCXControllerCLIProcessResult(
                 exitCode: 2,
                 stdout: Data(),
@@ -511,7 +511,7 @@ final class CCXProjectPickerTests: XCTestCase {
             withIntermediateDirectories: true
         )
         let taskSource = try makeFile(named: "tasks.md", in: repo)
-        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, _ in
+        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, _, _ in
             CCXControllerCLIProcessResult(exitCode: 2, stdout: Data(), stderr: Data("private path".utf8))
         }
         let viewModel = CCXProjectRegistrationViewModel(
@@ -595,7 +595,7 @@ final class CCXProjectPickerTests: XCTestCase {
             withIntermediateDirectories: true
         )
         let taskSource = try makeFile(named: "tasks.md", in: repo)
-        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, _ in
+        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, _, _ in
             throw CCXControllerCLIError.timedOut(seconds: 120)
         }
         let viewModel = CCXProjectRegistrationViewModel(
@@ -632,7 +632,7 @@ final class CCXProjectPickerTests: XCTestCase {
         ]
 
         for error in errors {
-            let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, _ in
+            let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, _, _ in
                 throw error
             }
             let viewModel = CCXProjectRegistrationViewModel(
@@ -663,7 +663,7 @@ final class CCXProjectPickerTests: XCTestCase {
             withIntermediateDirectories: true
         )
         let taskSource = try makeFile(named: "tasks.md", in: repo)
-        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, _ in
+        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, _, _ in
             throw NSError(domain: "private.internal.registration", code: 7)
         }
         let viewModel = CCXProjectRegistrationViewModel(
@@ -705,7 +705,7 @@ final class CCXProjectPickerTests: XCTestCase {
         """.data(using: .utf8)!
         var continuation: CheckedContinuation<CCXControllerCLIProcessResult, Never>?
         var runCount = 0
-        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, _ in
+        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, _, _ in
             runCount += 1
             return await withCheckedContinuation { pending in
                 continuation = pending
