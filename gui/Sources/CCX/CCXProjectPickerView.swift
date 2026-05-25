@@ -1,4 +1,5 @@
 import AppKit
+import Observation
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -20,7 +21,7 @@ public struct CCXProjectPickerView: View {
     let store: CCXProjectsStore
     let onOpenProject: (CCXProjectSummary) -> Void
     @State private var isAddProjectPresented = false
-    @StateObject private var registrationViewModel = CCXProjectRegistrationViewModel()
+    @State private var registrationViewModel = CCXProjectRegistrationViewModel()
 
     public init(
         store: CCXProjectsStore,
@@ -63,6 +64,7 @@ public struct CCXProjectPickerView: View {
                     onOpenProject(project)
                 }
             )
+            .interactiveDismissDisabled(registrationViewModel.isSubmitting)
         }
     }
 
@@ -221,12 +223,13 @@ public enum CCXProjectRegistrationValidationError: Error, Equatable, LocalizedEr
 }
 
 @MainActor
-final class CCXProjectRegistrationViewModel: ObservableObject {
+@Observable
+final class CCXProjectRegistrationViewModel {
     typealias CLIProvider = () -> Result<CCXControllerCLI, CCXControllerCLIError>
 
-    @Published var form: CCXProjectRegistrationFormState
-    @Published private(set) var isSubmitting = false
-    @Published private(set) var errorMessage: String?
+    var form: CCXProjectRegistrationFormState
+    private(set) var isSubmitting = false
+    private(set) var errorMessage: String?
 
     private let fileManager: FileManager
     private let cliProvider: CLIProvider
@@ -250,9 +253,14 @@ final class CCXProjectRegistrationViewModel: ObservableObject {
     }
 
     func submit() async -> CCXProjectSummary? {
+        guard !isSubmitting else { return nil }
         if validationError != nil {
             return nil
         }
+
+        isSubmitting = true
+        errorMessage = nil
+        defer { isSubmitting = false }
 
         let cli: CCXControllerCLI
         switch cliProvider() {
@@ -262,10 +270,6 @@ final class CCXProjectRegistrationViewModel: ObservableObject {
             errorMessage = error.localizedDescription
             return nil
         }
-
-        isSubmitting = true
-        errorMessage = nil
-        defer { isSubmitting = false }
 
         do {
             return try await cli.register(
@@ -279,18 +283,16 @@ final class CCXProjectRegistrationViewModel: ObservableObject {
     }
 
     private static func message(for error: Error) -> String {
-        if case CCXControllerCLIError.processFailed(_, _, let stderr) = error {
-            let trimmed = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
-                return trimmed
-            }
+        if case CCXControllerCLIError.processFailed = error {
+            return String(localized: "ccx.projectRegistration.error.registerFailed",
+                          defaultValue: "Could not register the project. Check the selected repository and task source, then try again.")
         }
         return error.localizedDescription
     }
 }
 
 private struct CCXProjectRegistrationSheet: View {
-    @ObservedObject var viewModel: CCXProjectRegistrationViewModel
+    @Bindable var viewModel: CCXProjectRegistrationViewModel
     let onCancel: () -> Void
     let onRegistered: (CCXProjectSummary) -> Void
 
@@ -325,6 +327,7 @@ private struct CCXProjectRegistrationSheet: View {
                 Button(String(localized: "ccx.common.cancel", defaultValue: "Cancel")) {
                     onCancel()
                 }
+                .disabled(viewModel.isSubmitting)
                 Button {
                     Task {
                         if let project = await viewModel.submit() {
@@ -363,17 +366,29 @@ private struct CCXProjectRegistrationSheet: View {
     }
 
     private func chooseRepository() {
+        Task {
+            await chooseRepositoryURL()
+        }
+    }
+
+    private func chooseTaskSourceFile() {
+        Task {
+            await chooseTaskSourceFileURL()
+        }
+    }
+
+    private func chooseRepositoryURL() async {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.prompt = String(localized: "ccx.projectRegistration.choose", defaultValue: "Choose")
-        if panel.runModal() == .OK, let url = panel.url {
+        if await runOpenPanel(panel) == .OK, let url = panel.url {
             viewModel.form.repositoryPath = url.path
         }
     }
 
-    private func chooseTaskSourceFile() {
+    private func chooseTaskSourceFileURL() async {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
@@ -381,8 +396,16 @@ private struct CCXProjectRegistrationSheet: View {
         panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .text]
         panel.directoryURL = URL(fileURLWithPath: viewModel.form.trimmedRepositoryPath, isDirectory: true)
         panel.prompt = String(localized: "ccx.projectRegistration.choose", defaultValue: "Choose")
-        if panel.runModal() == .OK, let url = panel.url {
+        if await runOpenPanel(panel) == .OK, let url = panel.url {
             viewModel.form.taskSourceFilePath = url.path
+        }
+    }
+
+    private func runOpenPanel(_ panel: NSOpenPanel) async -> NSApplication.ModalResponse {
+        await withCheckedContinuation { continuation in
+            panel.begin { response in
+                continuation.resume(returning: response)
+            }
         }
     }
 }

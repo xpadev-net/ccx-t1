@@ -54,6 +54,8 @@
 - 2026-05-25: Validation passed: `git diff --check`; JSON parse for `gui/Resources/Localizable.xcstrings`. Targeted `xcodebuild` for `cmuxTests/CCXProjectPickerTests` compiled touched Swift/test files and ran `xcstringstool` dry-run, then stopped before test execution on the existing missing `gui/ghostty` checkout dependency.
 - 2026-05-25: Aligned task wording with the completed registration sheet and made validation text prefer the current form state over stale submit errors.
 - 2026-05-25: Reviewer subagent approved the change set.
+- 2026-05-25: `gh-review-hook` requested safe user-facing CLI failure copy, `@Observable` state, non-blocking `NSOpenPanel.begin`, duplicate-submit protection, and submit-time dismissal guards. Fixed each item and added duplicate-submit test coverage.
+- 2026-05-25: Hook-fix validation passed: `git diff --check`; JSON parse for `gui/Resources/Localizable.xcstrings`. Targeted `xcodebuild` compiled touched Swift/test files and ran `xcstringstool` dry-run, then stopped before test execution on the existing missing `gui/ghostty` checkout dependency.
 
 ## Decision Log
 
