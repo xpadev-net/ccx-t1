@@ -363,7 +363,9 @@ struct CCXTaskSourceFileStatus: Equatable, Sendable {
         }
 
         do {
-            _ = try Data(contentsOf: URL(fileURLWithPath: trimmedPath), options: [.mappedIfSafe])
+            guard fileManager.isReadableFile(atPath: trimmedPath) else {
+                throw CocoaError(.fileReadNoPermission)
+            }
             let attributes = try fileManager.attributesOfItem(atPath: trimmedPath)
             self.kind = .ready
             self.modifiedAt = attributes[.modificationDate] as? Date

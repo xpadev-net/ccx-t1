@@ -50,6 +50,8 @@ Research waived: local targeted discovery already identified the dashboard and p
 - 2026-05-26: Fixed hook findings by adding localized strings, moving task-source status checks behind `.task(id:)` plus detached utility work, logging raw unreadable errors while showing a sanitized UI message, passing a project snapshot into `CCXTasksView`, and correcting markdown heading spacing.
 - 2026-05-26: Second `gh-review-hook` pass reported dead storage in `CCXTaskSourceFileStatus.Kind.unreadable` and reused CCX workspaces keeping launch-arg titles after opening from a project summary.
 - 2026-05-26: Simplified `unreadable` to a payload-free status, updated reused CCX workspace custom titles from the resolved project title, and added a workspace unit test for summary-based retitling. Targeted `build-for-testing` passed; targeted `test` hit the existing host-app bootstrap failure before XCTest connection.
+- 2026-05-26: Third `gh-review-hook` pass reported orphaned workspace cleanup on CCX dashboard surface creation failure, unnecessary UUID sorting during project panel lookup, and full-file reads for readability checks.
+- 2026-05-26: Added cleanup via `closeWorkspace` on surface creation failure, removed the panel-key sort, and replaced full-file reads with `FileManager.isReadableFile(atPath:)`.
 
 ## Decision Log
 

@@ -39,7 +39,7 @@ extension Workspace {
     private func ccxDashboardPanelId(projectId: String) -> UUID? {
         let trimmedProjectId = projectId.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedProjectId.isEmpty else { return nil }
-        for panelId in panels.keys.sorted(by: { $0.uuidString < $1.uuidString }) {
+        for panelId in panels.keys {
             guard let panel = panels[panelId] as? CCXDashboardPanel,
                   panel.projectStore?.projectId == trimmedProjectId else {
                 continue
@@ -195,6 +195,7 @@ extension TabManager {
             autoWelcomeIfNeeded: false
         )
         guard workspace.ensureCCXDashboardSurface(projectId: trimmedProjectId, origin: origin) != nil else {
+            closeWorkspace(workspace)
             return nil
         }
         return workspace
