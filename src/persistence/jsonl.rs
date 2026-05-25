@@ -1,4 +1,4 @@
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io::Write;
 
 use camino::Utf8Path;
@@ -14,13 +14,39 @@ use crate::error::CcxError;
 /// data file is always opened in append-only mode.
 pub fn append_event_to_dir(dir: &Utf8Path, event: &Event) -> Result<(), CcxError> {
     append_events_to_dir(dir, std::slice::from_ref(event))
+        .map_err(EventBatchAppendError::into_error)
+}
+
+#[derive(Debug)]
+pub enum EventBatchAppendError {
+    RolledBack(CcxError),
+    Indeterminate(CcxError),
+}
+
+impl EventBatchAppendError {
+    pub fn into_error(self) -> CcxError {
+        match self {
+            Self::RolledBack(error) | Self::Indeterminate(error) => error,
+        }
+    }
 }
 
 /// Append multiple `Event`s as JSON lines to `events.jsonl` inside `dir`
 /// while holding one exclusive lock. Projection still runs after the durable
 /// append, preserving JSONL as the source of truth.
-pub fn append_events_to_dir(dir: &Utf8Path, events: &[Event]) -> Result<(), CcxError> {
-    std::fs::create_dir_all(dir)?;
+pub fn append_events_to_dir(dir: &Utf8Path, events: &[Event]) -> Result<(), EventBatchAppendError> {
+    let mut lines = Vec::with_capacity(events.len());
+    for event in events {
+        // Serialize to JSON (single line, no pretty-printing) before touching
+        // the file so serialization failures cannot partially append a batch.
+        let mut line = serde_json::to_string(event)
+            .map_err(|error| EventBatchAppendError::RolledBack(CcxError::Json(error)))?;
+        line.push('\n');
+        lines.push(line);
+    }
+
+    std::fs::create_dir_all(dir)
+        .map_err(|error| EventBatchAppendError::RolledBack(CcxError::Io(error)))?;
 
     let lock_path = dir.join("events.lock");
     let log_path = dir.join("events.jsonl");
@@ -30,24 +56,50 @@ pub fn append_events_to_dir(dir: &Utf8Path, events: &[Event]) -> Result<(), CcxE
         .create(true)
         .read(true)
         .write(true)
-        .open(&lock_path)?;
+        .open(&lock_path)
+        .map_err(|error| EventBatchAppendError::RolledBack(CcxError::Io(error)))?;
     let mut rw_lock = RwLock::new(lock_file);
-    let _guard = rw_lock.write()?;
+    let _guard = rw_lock.write().map_err(|error| {
+        EventBatchAppendError::RolledBack(CcxError::Io(std::io::Error::new(
+            error.kind(),
+            error.to_string(),
+        )))
+    })?;
 
     // Open the JSONL file in append mode (create if absent).
     let mut log_file = OpenOptions::new()
         .create(true)
+        .read(true)
         .append(true)
-        .open(&log_path)?;
+        .open(&log_path)
+        .map_err(|error| EventBatchAppendError::RolledBack(CcxError::Io(error)))?;
+    let original_len = log_file
+        .metadata()
+        .map_err(|error| EventBatchAppendError::RolledBack(CcxError::Io(error)))?
+        .len();
 
-    for event in events {
-        // Serialize to JSON (single line, no pretty-printing).
-        let mut line = serde_json::to_string(event)?;
-        line.push('\n');
-        log_file.write_all(line.as_bytes())?;
+    let fail_after_lines = test_fail_after_batch_lines();
+    for (index, line) in lines.iter().enumerate() {
+        if let Err(error) = log_file.write_all(line.as_bytes()) {
+            return rollback_or_indeterminate(&mut log_file, original_len, CcxError::Io(error));
+        }
+        if fail_after_lines == Some(index + 1) {
+            return rollback_or_indeterminate(
+                &mut log_file,
+                original_len,
+                CcxError::Other(anyhow::anyhow!(
+                    "simulated event batch append failure after {} lines",
+                    index + 1
+                )),
+            );
+        }
     }
-    log_file.flush()?;
-    log_file.sync_all()?;
+    if let Err(error) = log_file.flush() {
+        return rollback_or_indeterminate(&mut log_file, original_len, CcxError::Io(error));
+    }
+    if let Err(error) = log_file.sync_all() {
+        return rollback_or_indeterminate(&mut log_file, original_len, CcxError::Io(error));
+    }
 
     // Release the events.lock before the SQLite projection so concurrent appenders
     // are not blocked during DB I/O. JSONL durability is already guaranteed above.
@@ -59,6 +111,31 @@ pub fn append_events_to_dir(dir: &Utf8Path, events: &[Event]) -> Result<(), CcxE
     }
 
     Ok(())
+}
+
+fn rollback_or_indeterminate(
+    log_file: &mut File,
+    original_len: u64,
+    original_error: CcxError,
+) -> Result<(), EventBatchAppendError> {
+    if log_file.set_len(original_len).is_ok() && log_file.sync_all().is_ok() {
+        Err(EventBatchAppendError::RolledBack(original_error))
+    } else {
+        Err(EventBatchAppendError::Indeterminate(original_error))
+    }
+}
+
+fn test_fail_after_batch_lines() -> Option<usize> {
+    #[cfg(debug_assertions)]
+    {
+        std::env::var("CCX_TEST_FAIL_EVENT_BATCH_AFTER_LINES")
+            .ok()
+            .and_then(|value| value.parse().ok())
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        None
+    }
 }
 
 /// Execute an atomic read-evaluate-write operation on the event log.

@@ -12,7 +12,7 @@ use crate::domain::work_execution::WorkExecutionState;
 use crate::error::CcxError;
 use crate::git::github::{execute_merge, MergeConfig};
 use crate::git::worktree::{create_worktree, remove_worktree};
-use crate::persistence::jsonl::append_events_to_dir;
+use crate::persistence::jsonl::{append_events_to_dir, EventBatchAppendError};
 use crate::work::cleanup::{run_cleanup, CleanupConfig};
 
 // ---------------------------------------------------------------------------
@@ -122,8 +122,18 @@ pub fn create(args: CreateArgs) -> Result<(), CcxError> {
             worktree_created,
         ],
     ) {
-        cleanup_create_artifacts(&config.canonical_repo, &worktree, &branch, &execution_dir);
-        return Err(error);
+        match error {
+            EventBatchAppendError::RolledBack(error) => {
+                cleanup_create_artifacts(
+                    &config.canonical_repo,
+                    &worktree,
+                    &branch,
+                    &execution_dir,
+                );
+                return Err(error);
+            }
+            EventBatchAppendError::Indeterminate(error) => return Err(error),
+        }
     }
 
     if args.json {

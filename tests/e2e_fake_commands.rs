@@ -571,6 +571,107 @@ fn work_create_materializes_execution_task_file_and_worktree() {
 }
 
 #[test]
+fn work_create_cleans_artifacts_when_event_batch_rolls_back() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("ccx-home");
+    let repo = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    Command::new("git")
+        .args(["init"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["config", "user.name", "Test User"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    std::fs::write(repo.join("README.md"), "hello\n").unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "initial"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    let tasks = repo.join("tasks.md");
+    std::fs::write(&tasks, "- [ ] Create rollback test\n").unwrap();
+    let project_id = register_project(&home, &repo, &tasks);
+
+    let (code, _stdout, stderr) = run_ccx(
+        &[
+            "work",
+            "create",
+            "--project-id",
+            &project_id,
+            "--source-path",
+            tasks.to_str().unwrap(),
+            "--selector-type",
+            "checkbox",
+            "--selector-value",
+            "L1:- [ ] Create rollback test",
+            "--display-text",
+            "Create rollback test",
+            "--json",
+        ],
+        &[("CCX_TEST_FAIL_EVENT_BATCH_AFTER_LINES", "1")],
+        &home,
+    );
+
+    assert_ne!(
+        code, 0,
+        "work create should fail after injected append error"
+    );
+    assert!(
+        stderr.contains("simulated event batch append failure"),
+        "stderr should report injected failure: {stderr}"
+    );
+    let project_dir = home.join("projects").join(&project_id);
+    let execution_entries = std::fs::read_dir(project_dir.join("work-executions"))
+        .map(|entries| entries.count())
+        .unwrap_or(0);
+    assert_eq!(
+        execution_entries, 0,
+        "rolled-back event append should clean execution artifacts"
+    );
+    let worktree_entries = std::fs::read_dir(project_dir.join("worktrees"))
+        .map(|entries| entries.count())
+        .unwrap_or(0);
+    assert_eq!(
+        worktree_entries, 0,
+        "rolled-back event append should clean worktree artifacts"
+    );
+    let events_raw = std::fs::read_to_string(project_dir.join("events.jsonl")).unwrap();
+    assert!(
+        !events_raw.contains("work_execution_created"),
+        "rolled-back event append must not leave authoritative WorkExecution events"
+    );
+    let worktree_list = Command::new("git")
+        .args(["worktree", "list"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    let worktree_stdout = String::from_utf8_lossy(&worktree_list.stdout);
+    assert!(
+        !worktree_stdout.contains("ccx/"),
+        "rolled-back event append should remove the git worktree and branch"
+    );
+    let db = rusqlite::Connection::open(project_dir.join("state.sqlite")).unwrap();
+    let count: i64 = db
+        .query_row("SELECT COUNT(*) FROM work_executions", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 0);
+}
+
+#[test]
 fn fake_gh_review_hook_exit_0_is_accepted() {
     let fake_hook = fixture_bin_dir().join("gh-review-hook");
     let tmp = tempfile::tempdir().unwrap();

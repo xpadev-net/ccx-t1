@@ -62,8 +62,10 @@ Quality routing note:
 
 - 2026-05-26: Created plan after merging Phase 15.5 PR and starting branch `codex/work-execution-create-link`.
 - 2026-05-26: Addressed pre-PR reviewer findings by making WorkExecution event emission causal, serializing `task.md` front matter through YAML, and blocking GUI WorkExecution creation from dirty task-source drafts.
+- 2026-05-26: Addressed re-review append-failure finding by rolling back failed event batches under lock and cleaning materialized artifacts only when the rollback is confirmed.
 
 ## Decision Log
 
 - 2026-05-26: Use heading/checkbox candidate selection as the GUI MVP instead of raw `TextEditor` selection ranges, because SwiftUI `TextEditor` does not expose robust selection metadata.
 - 2026-05-26: Keep git worktree creation free of event-log side effects; `work create` now appends the WorkExecution parent and artifact events together in the required order after materialization succeeds.
+- 2026-05-26: Treat event append failures as either rolled-back or indeterminate; indeterminate failures leave material artifacts intact so JSONL cannot claim deleted files.
