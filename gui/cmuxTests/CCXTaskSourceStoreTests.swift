@@ -99,9 +99,9 @@ final class CCXTaskSourceStoreTests: XCTestCase {
                     """))
                 }
                 return .success(CCXControllerCLIProcessResult(
-                    exitCode: 1,
+                    exitCode: 2,
                     stdout: Data(),
-                    stderr: Data("error: task source conflict".utf8)
+                    stderr: Data("error wording is intentionally not part of the contract".utf8)
                 ))
             })
         }
@@ -114,6 +114,64 @@ final class CCXTaskSourceStoreTests: XCTestCase {
         XCTAssertTrue(store.isDirty)
         XCTAssertNotNil(store.conflictMessage)
         XCTAssertNil(store.errorMessage)
+    }
+
+    func testReloadDoesNotDiscardUnsavedDraft() async {
+        var invocations = 0
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, _, _ in
+                invocations += 1
+                return .success(Self.result(stdout: """
+                {
+                  "project_id": "p_123",
+                  "path": "/repo/z/tasks.md",
+                  "content": "loaded-\(invocations)",
+                  "hash": "hash-\(invocations)",
+                  "mtime": "2026-05-26T00:00:00Z",
+                  "warning": null
+                }
+                """))
+            })
+        }
+
+        await store.load()
+        store.draftContent = "draft"
+        await store.reload()
+
+        XCTAssertEqual(store.draftContent, "draft")
+        XCTAssertEqual(store.loadedHash, "hash-1")
+        XCTAssertEqual(invocations, 1)
+    }
+
+    func testWarningMessageUsesLocalizedKnownWarningCode() async {
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, _, _ in
+                .success(Self.result(stdout: """
+                {
+                  "project_id": "p_123",
+                  "path": "/repo/z/tasks.md",
+                  "content": "loaded",
+                  "hash": "hash-1",
+                  "mtime": "2026-05-26T00:00:00Z",
+                  "warning": {
+                    "code": "task_source_in_canonical_repo_dirty",
+                    "message": "backend text should not be displayed"
+                  }
+                }
+                """))
+            })
+        }
+
+        await store.load()
+
+        XCTAssertEqual(
+            store.warningMessage,
+            String(
+                localized: "ccx.tasks.warning.canonicalRepoDirty",
+                defaultValue: "Task source is inside the canonical repository and the working tree has uncommitted changes."
+            )
+        )
+        XCTAssertFalse(store.warningMessage?.contains("backend text") ?? true)
     }
 
     func testDiscardRestoresLoadedContent() async {

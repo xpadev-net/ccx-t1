@@ -1,4 +1,5 @@
 import AppKit
+import Observation
 import SwiftUI
 
 public struct CCXTasksView: View {
@@ -27,12 +28,12 @@ public struct CCXTasksView: View {
 private struct CCXTaskSourcePanel: View {
     let project: CCXProjectSummary
     @State private var status: CCXTaskSourceFileStatus
-    @StateObject private var sourceStore: CCXTaskSourceStore
+    @State private var sourceStore: CCXTaskSourceStore
 
     init(project: CCXProjectSummary) {
         self.project = project
         self._status = State(initialValue: CCXTaskSourceFileStatus.checking(path: project.taskSourceFile))
-        self._sourceStore = StateObject(wrappedValue: CCXTaskSourceStore(projectId: project.projectId))
+        self._sourceStore = State(initialValue: CCXTaskSourceStore(projectId: project.projectId))
     }
 
     var body: some View {
@@ -125,7 +126,7 @@ private struct CCXTaskSourcePanel: View {
                     Label(String(localized: "ccx.tasks.action.reload", defaultValue: "Reload"),
                           systemImage: "arrow.clockwise")
                 }
-                .disabled(sourceStore.isLoading || sourceStore.isSaving)
+                .disabled(sourceStore.isDirty || sourceStore.isLoading || sourceStore.isSaving)
 
                 Button {
                     sourceStore.discardChanges()

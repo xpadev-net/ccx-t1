@@ -18,6 +18,12 @@ pub enum CcxError {
     #[error("task file conflict: concurrent edit detected on task.md")]
     TaskFileConflict,
 
+    #[error("task source conflict: expected hash {expected_hash}, found {actual_hash}")]
+    TaskSourceConflict {
+        expected_hash: String,
+        actual_hash: String,
+    },
+
     #[error("project not found: {project_id}")]
     ProjectNotFound { project_id: String },
 
@@ -43,6 +49,15 @@ pub enum CcxError {
     Other(#[from] anyhow::Error),
 }
 
+impl CcxError {
+    pub fn exit_code(&self) -> i32 {
+        match self {
+            CcxError::TaskSourceConflict { .. } => 2,
+            _ => 1,
+        }
+    }
+}
+
 impl From<rusqlite::Error> for CcxError {
     fn from(e: rusqlite::Error) -> Self {
         CcxError::Database(e.to_string())
@@ -51,6 +66,9 @@ impl From<rusqlite::Error> for CcxError {
 
 impl From<notify::Error> for CcxError {
     fn from(e: notify::Error) -> Self {
-        CcxError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+        CcxError::Io(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            e.to_string(),
+        ))
     }
 }

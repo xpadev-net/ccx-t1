@@ -182,10 +182,10 @@ fn ensure_expected_hash(
 ) -> Result<LoadedTaskSource, CcxError> {
     let loaded = load_task_source(config)?;
     if loaded.hash != expected_hash {
-        return Err(CcxError::Other(anyhow::anyhow!(
-            "task source conflict: expected hash {expected_hash}, found {}",
-            loaded.hash
-        )));
+        return Err(CcxError::TaskSourceConflict {
+            expected_hash: expected_hash.to_owned(),
+            actual_hash: loaded.hash,
+        });
     }
     Ok(loaded)
 }
@@ -251,10 +251,10 @@ fn task_source_lock_path(config: &ProjectConfig) -> Result<Utf8PathBuf, CcxError
 
 fn ensure_loaded_hash(loaded: &LoadedTaskSource, expected_hash: &str) -> Result<(), CcxError> {
     if loaded.hash != expected_hash {
-        return Err(CcxError::Other(anyhow::anyhow!(
-            "task source conflict: expected hash {expected_hash}, found {}",
-            loaded.hash
-        )));
+        return Err(CcxError::TaskSourceConflict {
+            expected_hash: expected_hash.to_owned(),
+            actual_hash: loaded.hash.clone(),
+        });
     }
     Ok(())
 }

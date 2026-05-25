@@ -1,17 +1,21 @@
 import Foundation
+import Observation
 
 @MainActor
-final class CCXTaskSourceStore: ObservableObject {
+@Observable
+final class CCXTaskSourceStore {
     typealias CLIProvider = () -> Result<CCXControllerCLI, CCXControllerCLIError>
 
-    @Published private(set) var snapshot: CCXTaskSourceSnapshot?
-    @Published var draftContent = ""
-    @Published private(set) var isLoading = false
-    @Published private(set) var isSaving = false
-    @Published private(set) var errorMessage: String?
-    @Published private(set) var conflictMessage: String?
+    private(set) var snapshot: CCXTaskSourceSnapshot?
+    var draftContent = ""
+    private(set) var isLoading = false
+    private(set) var isSaving = false
+    private(set) var errorMessage: String?
+    private(set) var conflictMessage: String?
 
+    @ObservationIgnored
     private let projectId: String
+    @ObservationIgnored
     private let cliProvider: CLIProvider
 
     init(
@@ -40,7 +44,19 @@ final class CCXTaskSourceStore: ObservableObject {
     }
 
     var warningMessage: String? {
-        snapshot?.warning?.message
+        guard let warning = snapshot?.warning else { return nil }
+        switch warning.code {
+        case "task_source_in_canonical_repo_dirty":
+            return String(
+                localized: "ccx.tasks.warning.canonicalRepoDirty",
+                defaultValue: "Task source is inside the canonical repository and the working tree has uncommitted changes."
+            )
+        default:
+            return String(
+                localized: "ccx.tasks.warning.generic",
+                defaultValue: "Task source returned a warning."
+            )
+        }
     }
 
     func load() async {
@@ -59,6 +75,7 @@ final class CCXTaskSourceStore: ObservableObject {
     }
 
     func reload() async {
+        guard !isDirty else { return }
         await load()
     }
 
@@ -94,7 +111,7 @@ final class CCXTaskSourceStore: ObservableObject {
             if Self.isConflict(error) {
                 conflictMessage = String(
                     localized: "ccx.tasks.editor.conflict",
-                    defaultValue: "The task source changed on disk. Reload before saving, or discard your draft."
+                    defaultValue: "The task source changed on disk. Reload, then apply your edits again."
                 )
             } else {
                 errorMessage = Self.message(for: error)
@@ -117,10 +134,10 @@ final class CCXTaskSourceStore: ObservableObject {
     }
 
     private static func isConflict(_ error: Error) -> Bool {
-        guard case let CCXControllerCLIError.processFailed(_, _, stderr) = error else {
+        guard case let CCXControllerCLIError.processFailed(exitCode, _, _) = error else {
             return false
         }
-        return stderr.contains("task source conflict")
+        return exitCode == 2
     }
 
     private static func message(for error: Error) -> String {
