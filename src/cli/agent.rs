@@ -9,6 +9,7 @@ use crate::agent_runtime::launch::{launch_agent, LaunchResult, LaunchSpec};
 use crate::agent_runtime::lifecycle::{handle_lifecycle_stop, LifecycleStopConfig};
 use crate::agent_runtime::prompt::{read_message, send_to_tmux, PromptSource};
 use crate::agent_runtime::tmux_adapter::{ShellTmuxAdapter, TmuxAdapter};
+use crate::config::project_config::ProjectConfig;
 use crate::config::{ccx_home, project_dir};
 use crate::domain::event::{generate_id, Actor, AgentSessionStoppedPayload, Event, EventData};
 use crate::error::CcxError;
@@ -28,7 +29,56 @@ pub struct StartOrchestratorArgs {
 }
 
 pub fn start_orchestrator(args: StartOrchestratorArgs) -> Result<(), CcxError> {
+    let home = ccx_home()?;
+    let cli_path = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.into_os_string().into_string().ok())
+        .unwrap_or_else(|| "ccx".into());
+    let tmux = ShellTmuxAdapter;
+    let cmux = make_adapter();
+    start_orchestrator_with_adapters(args, &home, &cli_path, &tmux, cmux.as_ref())
+}
+
+fn start_orchestrator_with_adapters(
+    args: StartOrchestratorArgs,
+    home: &Utf8Path,
+    cli_path: &str,
+    tmux: &dyn TmuxAdapter,
+    cmux: &dyn crate::agent_runtime::cmux_adapter::CmuxAdapter,
+) -> Result<(), CcxError> {
     let session_id = generate_id().to_string();
+    let project_dir = home.join("projects").join(&args.project_id);
+    let config = load_project_config_from_dir(&project_dir, &args.project_id)?;
+    let envs = build_agent_envs(&AgentEnvInput {
+        project_id: &args.project_id,
+        work_execution_id: None,
+        agent_session_id: &session_id,
+        worktree_path: None,
+        task_file: None,
+        cli_path,
+        canonical_repo: config.canonical_repo.as_str(),
+        role: "orchestrator",
+        attach_mode: None,
+    });
+
+    let result = launch_agent(
+        &LaunchSpec {
+            agent_session_id: session_id.clone(),
+            project_id: args.project_id.clone(),
+            project_dir,
+            work_execution_id: None,
+            role: "orchestrator".into(),
+            attach_mode: None,
+            cwd_path: PathBuf::from(config.canonical_repo.as_str()),
+            worktree_path: None,
+            envs,
+            display_slug: config.display_slug,
+            canonical_repo: config.canonical_repo.to_string(),
+        },
+        tmux,
+        cmux,
+    )?;
+
     if args.json {
         println!(
             "{}",
@@ -36,13 +86,36 @@ pub fn start_orchestrator(args: StartOrchestratorArgs) -> Result<(), CcxError> {
                 "agent_session_id": session_id,
                 "project_id": args.project_id,
                 "role": "orchestrator",
+                "tmux_session_id": result.tmux_session_id,
+                "cmux_workspace_id": result.cmux_workspace_id,
+                "cmux_tab_id": result.cmux_tab_id,
                 "status": "started",
             }))?
         );
     } else {
-        println!("agent_session_id: {session_id}  (skeleton — not yet implemented)");
+        println!(
+            "agent_session_id: {session_id}  tmux: {}  cmux_tab: {}",
+            result.tmux_session_id, result.cmux_tab_id
+        );
     }
     Ok(())
+}
+
+fn load_project_config_from_dir(
+    project_dir: &Utf8Path,
+    project_id: &str,
+) -> Result<ProjectConfig, CcxError> {
+    let path = project_dir.join("project.json");
+    let raw = std::fs::read_to_string(&path).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            CcxError::ProjectNotFound {
+                project_id: project_id.to_owned(),
+            }
+        } else {
+            CcxError::Io(e)
+        }
+    })?;
+    Ok(serde_json::from_str(&raw)?)
 }
 
 // ---------------------------------------------------------------------------
@@ -592,6 +665,24 @@ mod tests {
         let project_id = "01JTEST00000000000000000001";
         let project_dir = home.join("projects").join(project_id);
         std::fs::create_dir_all(&project_dir)?;
+        std::fs::write(
+            project_dir.join("project.json"),
+            serde_json::to_string(&serde_json::json!({
+                "project_id": project_id,
+                "display_slug": "my-project",
+                "canonical_repo": "/repos/myproject",
+                "task_source_file": "/repos/myproject/tasks.md",
+                "gh_review_hook": {
+                    "command": "./gh-review-hook",
+                    "timeout_seconds": 300,
+                },
+                "cleanup_policy": "keep_last_n",
+                "keep_last_n": 5,
+                "keep_for_days": 7,
+                "created_at": "2026-05-25T00:00:00Z",
+            }))
+            .unwrap(),
+        )?;
         let conn = open_db(&project_dir)?;
         conn.execute(
             "INSERT INTO projects (
@@ -627,6 +718,50 @@ mod tests {
             ],
         )?;
         Ok(())
+    }
+
+    #[test]
+    fn start_orchestrator_launches_tmux_and_records_session() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
+        seed_project(&home).unwrap();
+        let tmux = CaptureTmuxAdapter::new();
+
+        start_orchestrator_with_adapters(
+            StartOrchestratorArgs {
+                project_id: "01JTEST00000000000000000001".into(),
+                json: true,
+            },
+            &home,
+            "/usr/local/bin/ccx",
+            &tmux,
+            &HeadlessCmuxAdapter,
+        )
+        .unwrap();
+
+        let envs = tmux.envs.lock().unwrap().clone().expect("tmux envs");
+        assert_eq!(envs["CCX_PROJECT_ID"], "01JTEST00000000000000000001");
+        assert!(!envs.contains_key("CCX_WORK_EXECUTION_ID"));
+        assert!(!envs.contains_key("CCX_ATTACH_MODE"));
+        assert_eq!(envs["CCX_CLI"], "/usr/local/bin/ccx");
+        assert_eq!(envs["CCX_CANONICAL_REPO"], "/repos/myproject");
+        assert_eq!(envs["CCX_ROLE"], "orchestrator");
+
+        let cwd = tmux.cwd.lock().unwrap().clone().expect("tmux cwd");
+        assert_eq!(cwd, PathBuf::from("/repos/myproject"));
+
+        let project_dir = home.join("projects").join("01JTEST00000000000000000001");
+        let events = read_events_from_dir(&project_dir).unwrap();
+        assert!(events.iter().any(|event| {
+            matches!(
+                &event.data,
+                EventData::AgentSessionCreated(payload)
+                    if payload.role == "orchestrator"
+                        && payload.work_execution_id.is_none()
+                        && payload.attach_mode.is_none()
+                        && payload.cwd == "/repos/myproject"
+            )
+        }));
     }
 
     #[test]
