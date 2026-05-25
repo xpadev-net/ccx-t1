@@ -18,7 +18,7 @@ to `$CCX_HOME/projects/<projectId>/` (default `~/.ccx/projects/<id>/`):
 | `CCXModels.swift`         | Value types mirroring the SQLite read model.                              |
 | `CCXProjectStore.swift`   | `ObservableObject` SQLite reader + `FSEventStream` watcher.               |
 | `CCXLaunchArguments.swift`| Parses CCX launch flags and default-project environment policy.           |
-| `CCXDashboardView.swift`  | Top-level tabbed dashboard (Overview / Work / Reviews / Artifacts).       |
+| `CCXDashboardView.swift`  | Top-level tabbed dashboard (Overview / Work / Reviews / Tasks / Artifacts). |
 | `CCXSidebarPanel.swift`   | Compact summary surface for the cmux right-sidebar panel system.          |
 
 ## Xcode wiring
