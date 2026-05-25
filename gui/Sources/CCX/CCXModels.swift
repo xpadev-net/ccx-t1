@@ -186,6 +186,36 @@ public struct CCXAgentPromptResult: Hashable, Sendable, Decodable {
     }
 }
 
+public struct CCXWorkCreateResult: Hashable, Sendable, Decodable {
+    public let workExecutionId: String
+    public let branchName: String
+    public let worktreePath: String
+    public let taskFilePath: String
+
+    private enum CodingKeys: String, CodingKey {
+        case workExecutionId = "work_execution_id"
+        case branchName = "branch_name"
+        case worktreePath = "worktree_path"
+        case taskFilePath = "task_file_path"
+    }
+}
+
+public struct CCXAgentAttachResult: Hashable, Sendable, Decodable {
+    public let agentSessionId: String
+    public let workExecutionId: String
+    public let role: String
+    public let mode: String
+    public let status: String
+
+    private enum CodingKeys: String, CodingKey {
+        case agentSessionId = "agent_session_id"
+        case workExecutionId = "work_execution_id"
+        case role
+        case mode
+        case status
+    }
+}
+
 /// Lifecycle states the controller writes to `work_executions.state`.
 /// Mirrors `crate::domain::work_execution::WorkExecutionState`.
 public enum CCXWorkExecutionState: String, CaseIterable, Sendable {

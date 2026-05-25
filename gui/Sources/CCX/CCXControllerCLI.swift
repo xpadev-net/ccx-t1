@@ -201,6 +201,53 @@ nonisolated public struct CCXControllerCLI {
         return try decodeJSONResult(result, as: CCXAgentPromptResult.self)
     }
 
+    public func createWork(
+        projectId: String,
+        sourcePath: String,
+        selectorType: String,
+        selectorValue: String,
+        displayText: String
+    ) async throws -> CCXWorkCreateResult {
+        let result = try await runner(executableURL, [
+            "work",
+            "create",
+            "--project-id",
+            projectId,
+            "--source-path",
+            sourcePath,
+            "--selector-type",
+            selectorType,
+            "--selector-value",
+            selectorValue,
+            "--display-text",
+            displayText,
+            "--json",
+        ], nil)
+        return try decodeJSONResult(result, as: CCXWorkCreateResult.self)
+    }
+
+    public func attachAgent(
+        projectId: String,
+        workExecutionId: String,
+        role: String,
+        mode: String
+    ) async throws -> CCXAgentAttachResult {
+        let result = try await runner(executableURL, [
+            "agent",
+            "attach",
+            "--project-id",
+            projectId,
+            "--work-execution-id",
+            workExecutionId,
+            "--role",
+            role,
+            "--mode",
+            mode,
+            "--json",
+        ], nil)
+        return try decodeJSONResult(result, as: CCXAgentAttachResult.self)
+    }
+
     private func decodeJSONResult<T: Decodable>(
         _ result: CCXControllerCLIProcessResult,
         as type: T.Type

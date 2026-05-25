@@ -607,6 +607,73 @@ final class CCXTaskSourceStoreTests: XCTestCase {
         XCTAssertFalse(store.isDirty)
     }
 
+    func testWorkItemCandidatesIncludeHeadingsAndCheckboxes() {
+        let candidates = CCXTaskSourceStore.workItemCandidates(in: """
+        # Phase 1
+        text
+        - [ ] Build create flow
+        * [x] done
+        ## Phase 2
+        """)
+
+        XCTAssertEqual(candidates.map(\.selectorType), ["heading", "checkbox", "heading"])
+        XCTAssertEqual(candidates[0].displayText, "Phase 1")
+        XCTAssertEqual(candidates[1].displayText, "Build create flow")
+        XCTAssertEqual(candidates[1].selectorValue, "L3:- [ ] Build create flow")
+    }
+
+    func testCreateWorkExecutionCreatesAttachesAndPromptsWorker() async {
+        var calls: [[String]] = []
+        var promptedMessage: String?
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, arguments, stdin in
+                calls.append(arguments)
+                if arguments.contains("create") {
+                    return .success(Self.result(stdout: """
+                    {
+                      "work_execution_id": "we_1",
+                      "branch_name": "ccx/we_1/build",
+                      "worktree_path": "/worktrees/we_1",
+                      "task_file_path": "/work-executions/we_1/task.md"
+                    }
+                    """))
+                }
+                if arguments.contains("attach") {
+                    return .success(Self.result(stdout: """
+                    {
+                      "agent_session_id": "sess_worker",
+                      "work_execution_id": "we_1",
+                      "role": "worker",
+                      "mode": "writer",
+                      "status": "attached"
+                    }
+                    """))
+                }
+                promptedMessage = String(data: stdin ?? Data(), encoding: .utf8)
+                return .success(Self.result(stdout: """
+                {
+                  "session_id": "sess_worker",
+                  "status": "sent"
+                }
+                """))
+            })
+        }
+        store.draftContent = "- [ ] Build create flow\n"
+
+        await store.createWorkExecutionFromSelection(project: Self.project)
+
+        XCTAssertEqual(calls.map { Array($0.prefix(2)) }, [
+            ["work", "create"],
+            ["agent", "attach"],
+            ["agent", "prompt"],
+        ])
+        XCTAssertTrue(calls[0].contains("checkbox"))
+        XCTAssertTrue(calls[0].contains("Build create flow"))
+        XCTAssertTrue(promptedMessage?.contains("we_1") ?? false)
+        XCTAssertNotNil(store.workCreateStatusMessage)
+        XCTAssertNil(store.workCreateErrorMessage)
+    }
+
     private static func cli(
         _ handler: @escaping (
             URL,

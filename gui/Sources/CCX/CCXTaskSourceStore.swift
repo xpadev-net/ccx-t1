@@ -16,8 +16,12 @@ final class CCXTaskSourceStore {
     private(set) var composerErrorMessage: String?
     private(set) var composerStatusMessage: String?
     private(set) var sourceChangeMessage: String?
+    private(set) var workCreateErrorMessage: String?
+    private(set) var workCreateStatusMessage: String?
+    private(set) var isCreatingWork = false
     private var pendingSourceChangeHash: String?
     var composerInput = ""
+    var selectedWorkItemCandidateId: String?
     var desiredTaskFormat = String(
         localized: "ccx.defaultTaskFormat",
         defaultValue: "- [ ] <actionable task title>\n  - context: <why this matters>\n  - acceptance: <how to verify it>"
@@ -47,6 +51,23 @@ final class CCXTaskSourceStore {
 
     var canSubmitComposer: Bool {
         !composerInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isComposing
+    }
+
+    var workItemCandidates: [CCXTaskSourceWorkItemCandidate] {
+        Self.workItemCandidates(in: draftContent)
+    }
+
+    var selectedWorkItemCandidate: CCXTaskSourceWorkItemCandidate? {
+        let candidates = workItemCandidates
+        if let selectedWorkItemCandidateId,
+           let selected = candidates.first(where: { $0.id == selectedWorkItemCandidateId }) {
+            return selected
+        }
+        return candidates.first
+    }
+
+    var canCreateWorkExecution: Bool {
+        snapshot != nil && selectedWorkItemCandidate != nil && !isCreatingWork
     }
 
     var loadedHash: String? {
@@ -132,6 +153,41 @@ final class CCXTaskSourceStore {
 
     func clearComposerStatusMessage() {
         composerStatusMessage = nil
+    }
+
+    func createWorkExecutionFromSelection(project: CCXProjectSummary) async {
+        guard let candidate = selectedWorkItemCandidate, !isCreatingWork else { return }
+        isCreatingWork = true
+        workCreateErrorMessage = nil
+        workCreateStatusMessage = nil
+        defer { isCreatingWork = false }
+
+        do {
+            let cli = try cli()
+            let created = try await cli.createWork(
+                projectId: project.projectId,
+                sourcePath: project.taskSourceFile,
+                selectorType: candidate.selectorType,
+                selectorValue: candidate.selectorValue,
+                displayText: candidate.displayText
+            )
+            let attached = try await cli.attachAgent(
+                projectId: project.projectId,
+                workExecutionId: created.workExecutionId,
+                role: "worker",
+                mode: "writer"
+            )
+            _ = try await cli.promptAgent(
+                sessionId: attached.agentSessionId,
+                message: Self.workerPrompt(created: created, candidate: candidate)
+            )
+            workCreateStatusMessage = String(
+                localized: "ccx.tasks.workCreate.sent",
+                defaultValue: "Created WorkExecution and prompted a Worker."
+            )
+        } catch {
+            workCreateErrorMessage = Self.workCreateMessage(for: error)
+        }
     }
 
     func save() async {
@@ -244,6 +300,58 @@ final class CCXTaskSourceStore {
         """
     }
 
+    static func workerPrompt(
+        created: CCXWorkCreateResult,
+        candidate: CCXTaskSourceWorkItemCandidate
+    ) -> String {
+        """
+        WorkExecution \(created.workExecutionId) has been created from the task source.
+
+        Selected item:
+        \(candidate.displayText)
+
+        Task file:
+        \(created.taskFilePath)
+
+        Worktree:
+        \(created.worktreePath)
+
+        Please read the task file, inspect the repository, and begin implementation within the worktree.
+        """
+    }
+
+    static func workItemCandidates(in markdown: String) -> [CCXTaskSourceWorkItemCandidate] {
+        markdown
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .enumerated()
+            .compactMap { index, rawLine in
+                let lineNumber = index + 1
+                let line = String(rawLine)
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if trimmed.hasPrefix("#") {
+                    let title = trimmed.drop { $0 == "#" }.trimmingCharacters(in: .whitespaces)
+                    guard !title.isEmpty else { return nil }
+                    return CCXTaskSourceWorkItemCandidate(
+                        id: "heading-\(lineNumber)",
+                        selectorType: "heading",
+                        selectorValue: "L\(lineNumber):\(title)",
+                        displayText: title
+                    )
+                }
+                if trimmed.hasPrefix("- [ ]") || trimmed.hasPrefix("* [ ]") {
+                    let title = trimmed.dropFirst(5).trimmingCharacters(in: .whitespaces)
+                    guard !title.isEmpty else { return nil }
+                    return CCXTaskSourceWorkItemCandidate(
+                        id: "checkbox-\(lineNumber)",
+                        selectorType: "checkbox",
+                        selectorValue: "L\(lineNumber):\(trimmed)",
+                        displayText: title
+                    )
+                }
+                return nil
+            }
+    }
+
     private func apply(snapshot: CCXTaskSourceSnapshot) {
         self.snapshot = snapshot
         self.draftContent = snapshot.content
@@ -294,4 +402,26 @@ final class CCXTaskSourceStore {
         return String(localized: "ccx.tasks.composer.error.generic",
                       defaultValue: "Could not send the request to Orchestrator. Check the agent session, then try again.")
     }
+
+    private static func workCreateMessage(for error: Error) -> String {
+        if let cliError = error as? CCXControllerCLIError {
+            switch cliError {
+            case .executableNotFound, .notExecutable, .launchFailed:
+                return String(localized: "ccx.tasks.editor.error.cliUnavailable",
+                              defaultValue: "CCX controller CLI is not available. Check the CCX installation, then try again.")
+            case .processFailed, .invalidJSON, .timedOut, .cancelled:
+                return String(localized: "ccx.tasks.workCreate.error.generic",
+                              defaultValue: "Could not create the WorkExecution. Check the selected task and try again.")
+            }
+        }
+        return String(localized: "ccx.tasks.workCreate.error.generic",
+                      defaultValue: "Could not create the WorkExecution. Check the selected task and try again.")
+    }
+}
+
+struct CCXTaskSourceWorkItemCandidate: Identifiable, Hashable {
+    let id: String
+    let selectorType: String
+    let selectorValue: String
+    let displayText: String
 }
