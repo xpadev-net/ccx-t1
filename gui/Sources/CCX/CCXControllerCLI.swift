@@ -166,7 +166,7 @@ nonisolated public struct CCXControllerCLI {
                 completion.setTimeoutTask(timeoutTask)
 
                 do {
-                    if Task.isCancelled {
+                    guard completion.prepareToLaunch() else {
                         completion.finish(
                             .failure(CCXControllerCLIError.cancelled),
                             collectRemainingOutput: false,
@@ -174,9 +174,12 @@ nonisolated public struct CCXControllerCLI {
                         )
                         return
                     }
-                    guard !completion.isFinished else { return }
                     try process.run()
+                    _ = completion.finishIfCancellationRequestedAfterLaunch()
                 } catch {
+                    if completion.finishIfCancellationRequestedAfterLaunch() {
+                        return
+                    }
                     completion.finish(
                         .failure(CCXControllerCLIError.launchFailed(error.localizedDescription)),
                         collectRemainingOutput: false,
@@ -261,10 +264,10 @@ public enum CCXControllerCLIError: Error, Equatable, LocalizedError {
                 localized: "ccx.controller.notExecutable",
                 defaultValue: "CCX controller CLI is not executable: \(path)"
             )
-        case .launchFailed(let message):
+        case .launchFailed:
             return String(
                 localized: "ccx.controller.launchFailed",
-                defaultValue: "Failed to launch CCX controller CLI: \(message)"
+                defaultValue: "CCX controller CLI could not be started. Check file permissions or reinstall it."
             )
         case .processFailed(let exitCode, _, _):
             return String(
@@ -308,11 +311,7 @@ private final class ProcessCancellation: @unchecked Sendable {
         lock.lock()
         let completion = self.completion
         lock.unlock()
-        completion?.finish(
-            .failure(CCXControllerCLIError.cancelled),
-            collectRemainingOutput: false,
-            terminateProcess: true
-        )
+        completion?.cancel()
     }
 }
 
@@ -322,6 +321,8 @@ private final class ProcessCancellation: @unchecked Sendable {
 private final class ProcessCompletion: @unchecked Sendable {
     private let lock = NSLock()
     private var didFinish = false
+    private var launchStarted = false
+    private var cancelRequestedBeforeLaunchReturned = false
     private var timeoutTask: Task<Void, Never>?
 
     private let continuation: CheckedContinuation<CCXControllerCLIProcessResult, Error>
@@ -355,10 +356,44 @@ private final class ProcessCompletion: @unchecked Sendable {
         lock.unlock()
     }
 
-    var isFinished: Bool {
+    func prepareToLaunch() -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        return didFinish
+        guard !didFinish else { return false }
+        launchStarted = true
+        return true
+    }
+
+    func finishIfCancellationRequestedAfterLaunch() -> Bool {
+        lock.lock()
+        let shouldCancel = cancelRequestedBeforeLaunchReturned && !didFinish
+        lock.unlock()
+        guard shouldCancel else { return false }
+        finish(
+            .failure(CCXControllerCLIError.cancelled),
+            collectRemainingOutput: false,
+            terminateProcess: true
+        )
+        return true
+    }
+
+    func cancel() {
+        lock.lock()
+        guard !didFinish else {
+            lock.unlock()
+            return
+        }
+        if launchStarted, !process.isRunning {
+            cancelRequestedBeforeLaunchReturned = true
+            lock.unlock()
+            return
+        }
+        lock.unlock()
+        finish(
+            .failure(CCXControllerCLIError.cancelled),
+            collectRemainingOutput: false,
+            terminateProcess: true
+        )
     }
 
     func finish(
