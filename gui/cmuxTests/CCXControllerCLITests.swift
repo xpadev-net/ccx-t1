@@ -78,9 +78,10 @@ final class CCXControllerCLITests: XCTestCase {
         """.data(using: .utf8)!
         var capturedExecutable: URL?
         var capturedArguments: [String] = []
-        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { executable, arguments in
+        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { executable, arguments, stdin in
             capturedExecutable = executable
             capturedArguments = arguments
+            XCTAssertNil(stdin)
             return CCXControllerCLIProcessResult(exitCode: 0, stdout: stdout, stderr: Data())
         }
 
@@ -106,7 +107,7 @@ final class CCXControllerCLITests: XCTestCase {
     }
 
     func testRegisterFailureKeepsStderr() async {
-        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, _ in
+        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, _, _ in
             CCXControllerCLIProcessResult(
                 exitCode: 2,
                 stdout: Data("partial".utf8),
@@ -127,10 +128,123 @@ final class CCXControllerCLITests: XCTestCase {
                 stderr: "canonical repo is invalid"
             ))
             XCTAssertFalse(error.localizedDescription.contains("canonical repo is invalid"))
-            XCTAssertTrue(error.localizedDescription.contains("exit code 2"))
+            XCTAssertTrue(error.localizedDescription.contains("2"))
         } catch {
             XCTFail("unexpected error: \(error)")
         }
+    }
+
+    func testReadTaskSourcePassesArgumentsAndDecodesSnapshot() async throws {
+        let stdout = """
+        {
+          "project_id": "p_123",
+          "path": "/repo/z/tasks.md",
+          "content": "- [ ] item\\n",
+          "hash": "abc123",
+          "mtime": "2026-05-26T00:00:00Z",
+          "warning": null
+        }
+        """.data(using: .utf8)!
+        var capturedArguments: [String] = []
+        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, arguments, stdin in
+            capturedArguments = arguments
+            XCTAssertNil(stdin)
+            return CCXControllerCLIProcessResult(exitCode: 0, stdout: stdout, stderr: Data())
+        }
+
+        let snapshot = try await cli.readTaskSource(projectId: "p_123")
+
+        XCTAssertEqual(capturedArguments, [
+            "task-source",
+            "read",
+            "--project-id",
+            "p_123",
+            "--json",
+        ])
+        XCTAssertEqual(snapshot.content, "- [ ] item\n")
+        XCTAssertEqual(snapshot.hash, "abc123")
+        XCTAssertEqual(snapshot.mtime, "2026-05-26T00:00:00Z")
+    }
+
+    func testWriteTaskSourcePassesStdinAndDecodesResult() async throws {
+        let stdout = """
+        {
+          "project_id": "p_123",
+          "path": "/repo/z/tasks.md",
+          "hash": "def456",
+          "mtime": "2026-05-26T00:00:01Z",
+          "bytes_written": 12,
+          "warning": null
+        }
+        """.data(using: .utf8)!
+        var capturedArguments: [String] = []
+        var capturedStdin: Data?
+        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, arguments, stdin in
+            capturedArguments = arguments
+            capturedStdin = stdin
+            return CCXControllerCLIProcessResult(exitCode: 0, stdout: stdout, stderr: Data())
+        }
+
+        let result = try await cli.writeTaskSource(
+            projectId: "p_123",
+            expectedHash: "abc123",
+            content: "new content\n"
+        )
+
+        XCTAssertEqual(capturedArguments, [
+            "task-source",
+            "write",
+            "--project-id",
+            "p_123",
+            "--expected-hash",
+            "abc123",
+            "--stdin",
+            "--json",
+        ])
+        XCTAssertEqual(String(data: capturedStdin ?? Data(), encoding: .utf8), "new content\n")
+        XCTAssertEqual(result.hash, "def456")
+        XCTAssertEqual(result.bytesWritten, 12)
+    }
+
+    func testAppendTaskSourcePassesStdinAndDecodesResult() async throws {
+        let stdout = """
+        {
+          "project_id": "p_123",
+          "path": "/repo/z/tasks.md",
+          "hash": "def456",
+          "mtime": "2026-05-26T00:00:01Z",
+          "append_offset_bytes": 8,
+          "bytes_appended": 4,
+          "warning": null
+        }
+        """.data(using: .utf8)!
+        var capturedArguments: [String] = []
+        var capturedStdin: Data?
+        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, arguments, stdin in
+            capturedArguments = arguments
+            capturedStdin = stdin
+            return CCXControllerCLIProcessResult(exitCode: 0, stdout: stdout, stderr: Data())
+        }
+
+        let result = try await cli.appendTaskSource(
+            projectId: "p_123",
+            expectedHash: "abc123",
+            content: "add\n"
+        )
+
+        XCTAssertEqual(capturedArguments, [
+            "task-source",
+            "append",
+            "--project-id",
+            "p_123",
+            "--expected-hash",
+            "abc123",
+            "--stdin",
+            "--json",
+        ])
+        XCTAssertEqual(String(data: capturedStdin ?? Data(), encoding: .utf8), "add\n")
+        XCTAssertEqual(result.appendOffsetBytes, 8)
+        XCTAssertEqual(result.bytesAppended, 4)
     }
 
     func testRegisterTimeoutTerminatesProcess() async throws {

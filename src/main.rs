@@ -84,7 +84,8 @@ fn main() {
     };
 
     if let Err(e) = result {
+        let exit_code = e.exit_code();
         eprintln!("error: {e}");
-        std::process::exit(1);
+        std::process::exit(exit_code);
     }
 }

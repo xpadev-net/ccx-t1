@@ -283,7 +283,7 @@ fn task_source_write_rejects_stale_expected_hash() {
         &home,
     );
 
-    assert_ne!(code, 0);
+    assert_eq!(code, 2);
     assert!(stderr.contains("task source conflict"));
     assert_eq!(std::fs::read_to_string(&tasks).unwrap(), "one\n");
 }
@@ -329,7 +329,7 @@ fn task_source_write_rechecks_hash_after_stdin() {
     let out = child.wait_with_output().expect("failed to run ccx");
     let stderr = String::from_utf8_lossy(&out.stderr);
 
-    assert!(!out.status.success());
+    assert_eq!(out.status.code(), Some(2));
     assert!(stderr.contains("task source conflict"));
     assert_eq!(std::fs::read_to_string(&tasks).unwrap(), "intervening\n");
 }
@@ -375,7 +375,7 @@ fn task_source_append_rechecks_hash_after_stdin() {
     let out = child.wait_with_output().expect("failed to run ccx");
     let stderr = String::from_utf8_lossy(&out.stderr);
 
-    assert!(!out.status.success());
+    assert_eq!(out.status.code(), Some(2));
     assert!(stderr.contains("task source conflict"));
     assert_eq!(std::fs::read_to_string(&tasks).unwrap(), "intervening\n");
 }

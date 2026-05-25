@@ -83,6 +83,83 @@ public struct CCXEventEntry: Identifiable, Hashable, Sendable {
     public var id: String { eventId }
 }
 
+public struct CCXTaskSourceWarning: Hashable, Sendable, Decodable {
+    public let code: String
+    public let message: String
+}
+
+public struct CCXTaskSourceSnapshot: Hashable, Sendable, Decodable {
+    public let projectId: String
+    public let path: String
+    public let content: String
+    public let hash: String
+    public let mtime: String
+    public let warning: CCXTaskSourceWarning?
+
+    private enum CodingKeys: String, CodingKey {
+        case projectId = "project_id"
+        case path
+        case content
+        case hash
+        case mtime
+        case warning
+    }
+
+    public init(
+        projectId: String,
+        path: String,
+        content: String,
+        hash: String,
+        mtime: String,
+        warning: CCXTaskSourceWarning?
+    ) {
+        self.projectId = projectId
+        self.path = path
+        self.content = content
+        self.hash = hash
+        self.mtime = mtime
+        self.warning = warning
+    }
+}
+
+public struct CCXTaskSourceWriteResult: Hashable, Sendable, Decodable {
+    public let projectId: String
+    public let path: String
+    public let hash: String
+    public let mtime: String
+    public let bytesWritten: Int
+    public let warning: CCXTaskSourceWarning?
+
+    private enum CodingKeys: String, CodingKey {
+        case projectId = "project_id"
+        case path
+        case hash
+        case mtime
+        case bytesWritten = "bytes_written"
+        case warning
+    }
+}
+
+public struct CCXTaskSourceAppendResult: Hashable, Sendable, Decodable {
+    public let projectId: String
+    public let path: String
+    public let hash: String
+    public let mtime: String
+    public let appendOffsetBytes: Int
+    public let bytesAppended: Int
+    public let warning: CCXTaskSourceWarning?
+
+    private enum CodingKeys: String, CodingKey {
+        case projectId = "project_id"
+        case path
+        case hash
+        case mtime
+        case appendOffsetBytes = "append_offset_bytes"
+        case bytesAppended = "bytes_appended"
+        case warning
+    }
+}
+
 /// Lifecycle states the controller writes to `work_executions.state`.
 /// Mirrors `crate::domain::work_execution::WorkExecutionState`.
 public enum CCXWorkExecutionState: String, CaseIterable, Sendable {
