@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::Args;
+use fd_lock::RwLock;
 
 use crate::agent_runtime::cmux_adapter::make_adapter;
 use crate::agent_runtime::env_builder::{build_agent_envs, AgentEnvInput};
@@ -48,6 +49,14 @@ fn start_orchestrator_with_adapters(
 ) -> Result<(), CcxError> {
     let project_dir = home.join("projects").join(&args.project_id);
     let config = load_project_config_from_dir(&project_dir, &args.project_id)?;
+    std::fs::create_dir_all(&project_dir)?;
+    let lock_file = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(project_dir.join("orchestrator.lock"))?;
+    let mut start_lock = RwLock::new(lock_file);
+    let _guard = start_lock.write()?;
     if let Some(existing) = active_orchestrator_session_id(&project_dir)? {
         print_start_orchestrator_reused_result(&args, &existing)?;
         return Ok(());
@@ -615,22 +624,29 @@ mod tests {
     use crate::persistence::sqlite::open_db;
     use std::collections::HashMap;
     use std::path::Path;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     struct CaptureTmuxAdapter {
         envs: Mutex<Option<HashMap<String, String>>>,
         cwd: Mutex<Option<PathBuf>>,
         created: Mutex<Vec<String>>,
         killed: Mutex<Vec<String>>,
+        create_delay: Duration,
     }
 
     impl CaptureTmuxAdapter {
         fn new() -> Self {
+            Self::with_create_delay(Duration::ZERO)
+        }
+
+        fn with_create_delay(create_delay: Duration) -> Self {
             Self {
                 envs: Mutex::new(None),
                 cwd: Mutex::new(None),
                 created: Mutex::new(Vec::new()),
                 killed: Mutex::new(Vec::new()),
+                create_delay,
             }
         }
     }
@@ -642,6 +658,9 @@ mod tests {
             cwd: &Path,
             envs: &HashMap<String, String>,
         ) -> Result<(), CcxError> {
+            if !self.create_delay.is_zero() {
+                std::thread::sleep(self.create_delay);
+            }
             self.created.lock().unwrap().push(session_id.to_string());
             *self.cwd.lock().unwrap() = Some(cwd.to_path_buf());
             *self.envs.lock().unwrap() = Some(envs.clone());
@@ -832,6 +851,55 @@ mod tests {
                 &HeadlessCmuxAdapter,
             )
             .unwrap();
+        }
+
+        assert_eq!(tmux.created.lock().unwrap().len(), 1);
+        let project_dir = home.join("projects").join("01JTEST00000000000000000001");
+        let created_events = read_events_from_dir(&project_dir)
+            .unwrap()
+            .into_iter()
+            .filter(|event| {
+                matches!(
+                    &event.data,
+                    EventData::AgentSessionCreated(payload)
+                        if payload.role == "orchestrator"
+                            && payload.work_execution_id.is_none()
+                )
+            })
+            .count();
+        assert_eq!(created_events, 1);
+    }
+
+    #[test]
+    fn concurrent_start_orchestrator_admits_one_session() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
+        seed_project(&home).unwrap();
+        let tmux = Arc::new(CaptureTmuxAdapter::with_create_delay(
+            Duration::from_millis(100),
+        ));
+
+        let handles = (0..2)
+            .map(|_| {
+                let home = home.clone();
+                let tmux = Arc::clone(&tmux);
+                std::thread::spawn(move || {
+                    start_orchestrator_with_adapters(
+                        StartOrchestratorArgs {
+                            project_id: "01JTEST00000000000000000001".into(),
+                            json: true,
+                        },
+                        &home,
+                        "/usr/local/bin/ccx",
+                        tmux.as_ref(),
+                        &HeadlessCmuxAdapter,
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+
+        for handle in handles {
+            handle.join().unwrap().unwrap();
         }
 
         assert_eq!(tmux.created.lock().unwrap().len(), 1);
