@@ -17,9 +17,9 @@ final class CCXDashboardPanel: Panel, ObservableObject {
 
     private var storeChangeCancellable: AnyCancellable?
 
-    init(projectId: String? = nil, ccxHome: URL? = nil, projectsStore: CCXProjectsStore? = nil) {
+    init(projectId: String? = nil, ccxHome: URL? = nil, projectsStore: CCXProjectsStore) {
         self.id = UUID()
-        self.projectsStore = projectsStore ?? CCXProjectsStore(ccxHome: ccxHome)
+        self.projectsStore = projectsStore
         if let projectId, !projectId.isEmpty {
             self.projectStore = CCXProjectStore(projectId: projectId, ccxHome: ccxHome)
         } else {

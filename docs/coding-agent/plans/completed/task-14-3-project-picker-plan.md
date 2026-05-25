@@ -67,6 +67,7 @@
 - 2026-05-25: `gh-review-hook` requested initial switch-menu disabled state, dashboard title fallback, debug-only launch diagnostics, empty-state Add Project access, `--ccx-project-picker` coverage, and task wording alignment. Fixed each item; reviewer subagent requested removing duplicate empty-state Add Project presentation, then approved. `git diff --check` passed. Targeted `xcodebuild` again stopped on the existing missing `gui/ghostty` checkout dependency.
 - 2026-05-25: `gh-review-hook` requested showing `CCXProjectsStore.lastRefreshError` in the switch menu before the empty-projects label. Fixed it; reviewer subagent approved. `git diff --check` passed. Targeted `xcodebuild` again stopped on the existing missing `gui/ghostty` checkout dependency.
 - 2026-05-25: `gh-review-hook` requested removing unnecessary `@Bindable` wrappers and restoring production diagnostics through privacy-marked `os.Logger` instead of `NSLog`. Fixed both; reviewer subagent approved. `git diff --check` passed. Targeted `xcodebuild` compiled touched files and again stopped on the existing missing `gui/ghostty` checkout dependency.
+- 2026-05-25: `gh-review-hook` requested making `CCXDashboardPanel` require an injected `CCXProjectsStore` so callers cannot accidentally create duplicate watchers through a fallback store. Updated call sites and README; reviewer subagent approved. `git diff --check` passed. Targeted `xcodebuild` compiled touched Swift/test files and again stopped on the existing missing `gui/ghostty` checkout dependency.
 
 ## Decision Log
 

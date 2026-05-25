@@ -46,7 +46,8 @@ construct a panel when a project id was actually supplied:
 ```swift
 let launchArgs = CCXLaunchArguments.parse()
 guard let projectId = launchArgs.projectId else { return }
-let panel = CCXDashboardPanel(projectId: projectId)
+let projectsStore = CCXProjectsStore()
+let panel = CCXDashboardPanel(projectId: projectId, projectsStore: projectsStore)
 workspace.adopt(panel: panel)  // existing cmux helper
 ```
 

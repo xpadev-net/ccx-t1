@@ -38,14 +38,16 @@ final class CCXProjectPickerTests: XCTestCase {
     }
 
     func testPanelWithoutProjectUsesPickerMode() {
-        let panel = CCXDashboardPanel(projectId: nil, ccxHome: temporaryHome())
+        let home = temporaryHome()
+        let panel = CCXDashboardPanel(projectId: nil, ccxHome: home, projectsStore: CCXProjectsStore(ccxHome: home))
 
         XCTAssertNil(panel.projectStore)
         XCTAssertEqual(panel.displayTitle, "CCX Projects")
     }
 
     func testPanelWithProjectUsesDashboardMode() {
-        let panel = CCXDashboardPanel(projectId: "p_1", ccxHome: temporaryHome())
+        let home = temporaryHome()
+        let panel = CCXDashboardPanel(projectId: "p_1", ccxHome: home, projectsStore: CCXProjectsStore(ccxHome: home))
 
         XCTAssertNotNil(panel.projectStore)
         XCTAssertEqual(panel.displayTitle, "CCX")
