@@ -1,0 +1,39 @@
+# Task 14.5 Project Switch Plan
+
+## Task
+
+Implement project switching for the CCX dashboard by adding `Workspace.switchToCCXDashboard(projectId:)` and routing project-picker selections through it.
+
+## Scope
+
+- Add a Workspace helper that replaces an existing `CCXDashboardPanel` with another project dashboard.
+- Preserve the existing bonsplit tab identity when replacing the dashboard so switching does not create extra tabs or replacement terminals.
+- Publish the old dashboard surface close event before publishing the new dashboard surface create event.
+- Route project-picker selections through the helper.
+- Mark `z/tasks.md` 14.5 complete.
+
+## Validation
+
+- `git diff --check`
+- JSON parse for `gui/Resources/Localizable.xcstrings`
+- `rtk plutil -lint gui/cmux.xcodeproj/project.pbxproj`
+- `rtk bash gui/scripts/lint-pbxproj-test-wiring.sh --repo-root gui`
+- Targeted `xcodebuild` for `cmuxTests/WorkspaceCCXDashboardSwitchTests` and `cmuxTests/CCXProjectPickerTests`
+
+## Progress
+
+- 2026-05-25: Added `Workspace.switchToCCXDashboard(projectId:origin:)`, reusing an existing dashboard tab while discarding the old dashboard panel lifecycle and publishing close before create.
+- 2026-05-25: Routed project-picker selections through `switchToCCXDashboard(projectId:)`.
+- 2026-05-25: Added unit coverage for replacing an existing dashboard panel and opening a dashboard when none exists.
+- 2026-05-25: Marked `z/tasks.md` 14.5 complete.
+- 2026-05-25: Validation passed: `git diff --check`; JSON parse for `gui/Resources/Localizable.xcstrings`; `rtk plutil -lint gui/cmux.xcodeproj/project.pbxproj`; `rtk bash gui/scripts/lint-pbxproj-test-wiring.sh --repo-root gui`. Targeted `xcodebuild` for `WorkspaceCCXDashboardSwitchTests` and `CCXProjectPickerTests` compiled touched Swift/test files and stopped before test execution on the existing missing `gui/ghostty` checkout dependency. Subagent review approved the lifecycle, tab reuse, fallback, and test coverage.
+- 2026-05-25: `gh-review-hook` requested removing non-deterministic `Dictionary.first` fallback selection when multiple CCX dashboards exist. Replaced it with pane/tab-order traversal.
+- 2026-05-25: Hook-fix validation passed: `git diff --check`; JSON parse for `gui/Resources/Localizable.xcstrings`; `rtk plutil -lint gui/cmux.xcodeproj/project.pbxproj`; `rtk bash gui/scripts/lint-pbxproj-test-wiring.sh --repo-root gui`. Subagent review approved the deterministic dashboard fallback selection.
+- 2026-05-25: `gh-review-hook` requested removing a redundant focused-pane rescan and covering the same-project focus-only branch. Skipped the focused pane in fallback traversal and added same-project switch coverage.
+- 2026-05-25: Second hook-fix validation passed: `git diff --check`; JSON parse for `gui/Resources/Localizable.xcstrings`; `rtk plutil -lint gui/cmux.xcodeproj/project.pbxproj`; `rtk bash gui/scripts/lint-pbxproj-test-wiring.sh --repo-root gui`. Targeted `xcodebuild` for `WorkspaceCCXDashboardSwitchTests` compiled touched Swift/test files and stopped before test execution on the existing missing `gui/ghostty` checkout dependency. Subagent review approved the focused-pane skip and same-project coverage.
+- 2026-05-25: `gh-review-hook` requested moving CCX switch logic out of `Workspace.swift` and publishing the reused tab id for replacement lifecycle create events. Moved the logic to `Workspace+CCXDashboard.swift` and changed replacement create publication to use the existing Bonsplit tab id.
+- 2026-05-25: Third hook-fix validation passed: `git diff --check`; JSON parse for `gui/Resources/Localizable.xcstrings`; `rtk plutil -lint gui/cmux.xcodeproj/project.pbxproj`; `rtk bash gui/scripts/lint-pbxproj-test-wiring.sh --repo-root gui`. Targeted `xcodebuild` compiled `Workspace.swift`, `Workspace+CCXDashboard.swift`, `WorkspaceContentView.swift`, CCX files, and touched tests before stopping on the existing missing `gui/ghostty` checkout dependency. Subagent review approved the extension split and reused-tab lifecycle create event.
+
+## Notes
+
+- Repository has no `docs/coding-agent/rules/` directory at the time of this task.

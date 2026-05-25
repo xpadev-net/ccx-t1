@@ -268,12 +268,7 @@ struct WorkspaceContentView: View {
                     },
                     onTriggerFlash: { workspace.triggerDebugFlash(panelId: panel.id) },
                     onOpenCCXProject: { project in
-                        _ = workspace.newCCXDashboardSurface(
-                            inPane: paneId,
-                            projectId: project.projectId,
-                            focus: true,
-                            origin: "ccx_project_picker"
-                        )
+                        _ = workspace.switchToCCXDashboard(projectId: project.projectId)
                     }
                 )
                 .onTapGesture {
