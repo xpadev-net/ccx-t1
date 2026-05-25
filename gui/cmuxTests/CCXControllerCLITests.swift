@@ -126,7 +126,8 @@ final class CCXControllerCLITests: XCTestCase {
                 stdout: "partial",
                 stderr: "canonical repo is invalid"
             ))
-            XCTAssertTrue(error.localizedDescription.contains("canonical repo is invalid"))
+            XCTAssertFalse(error.localizedDescription.contains("canonical repo is invalid"))
+            XCTAssertTrue(error.localizedDescription.contains("exit code 2"))
         } catch {
             XCTFail("unexpected error: \(error)")
         }

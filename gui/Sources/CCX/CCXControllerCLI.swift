@@ -1,6 +1,6 @@
 import Foundation
 
-public struct CCXControllerCLI {
+nonisolated public struct CCXControllerCLI {
     public typealias Runner = (
         _ executableURL: URL,
         _ arguments: [String]
@@ -9,6 +9,7 @@ public struct CCXControllerCLI {
     public let executableURL: URL
 
     private let runner: Runner
+    private static let processTimeoutSeconds = 120
 
     public init(executableURL: URL) {
         self.executableURL = executableURL
@@ -89,43 +90,80 @@ public struct CCXControllerCLI {
         executableURL: URL,
         arguments: [String]
     ) async throws -> CCXControllerCLIProcessResult {
-        try await withCheckedThrowingContinuation { continuation in
-            let process = Process()
-            process.executableURL = executableURL
-            process.arguments = arguments
+        let cancellation = ProcessCancellation()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let process = Process()
+                process.executableURL = executableURL
+                process.arguments = arguments
 
-            let stdoutPipe = Pipe()
-            let stderrPipe = Pipe()
-            let output = ProtectedProcessOutput()
-            process.standardOutput = stdoutPipe
-            process.standardError = stderrPipe
+                let stdoutPipe = Pipe()
+                let stderrPipe = Pipe()
+                let output = ProtectedProcessOutput()
+                let completion = ProcessCompletion(
+                    continuation: continuation,
+                    process: process,
+                    stdoutPipe: stdoutPipe,
+                    stderrPipe: stderrPipe,
+                    output: output
+                )
+                cancellation.set(completion)
+                process.standardOutput = stdoutPipe
+                process.standardError = stderrPipe
 
-            stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
-                output.appendStdout(handle.availableData)
-            }
-            stderrPipe.fileHandleForReading.readabilityHandler = { handle in
-                output.appendStderr(handle.availableData)
-            }
+                stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
+                    output.appendStdout(handle.availableData)
+                }
+                stderrPipe.fileHandleForReading.readabilityHandler = { handle in
+                    output.appendStderr(handle.availableData)
+                }
 
-            process.terminationHandler = { process in
-                stdoutPipe.fileHandleForReading.readabilityHandler = nil
-                stderrPipe.fileHandleForReading.readabilityHandler = nil
-                output.appendStdout(stdoutPipe.fileHandleForReading.readDataToEndOfFile())
-                output.appendStderr(stderrPipe.fileHandleForReading.readDataToEndOfFile())
-                continuation.resume(returning: CCXControllerCLIProcessResult(
-                    exitCode: process.terminationStatus,
-                    stdout: output.stdout,
-                    stderr: output.stderr
-                ))
-            }
+                process.terminationHandler = { process in
+                    completion.finish(
+                        .success(CCXControllerCLIProcessResult(
+                            exitCode: process.terminationStatus,
+                            stdout: output.stdout,
+                            stderr: output.stderr
+                        )),
+                        collectRemainingOutput: true,
+                        terminateProcess: false
+                    )
+                }
 
-            do {
-                try process.run()
-            } catch {
-                stdoutPipe.fileHandleForReading.readabilityHandler = nil
-                stderrPipe.fileHandleForReading.readabilityHandler = nil
-                continuation.resume(throwing: CCXControllerCLIError.launchFailed(error.localizedDescription))
+                let timeoutTask = Task {
+                    do {
+                        try await Task.sleep(nanoseconds: UInt64(processTimeoutSeconds) * 1_000_000_000)
+                    } catch {
+                        return
+                    }
+                    completion.finish(
+                        .failure(CCXControllerCLIError.timedOut(seconds: processTimeoutSeconds)),
+                        collectRemainingOutput: false,
+                        terminateProcess: true
+                    )
+                }
+                completion.setTimeoutTask(timeoutTask)
+
+                do {
+                    if Task.isCancelled {
+                        completion.finish(
+                            .failure(CCXControllerCLIError.cancelled),
+                            collectRemainingOutput: false,
+                            terminateProcess: true
+                        )
+                        return
+                    }
+                    try process.run()
+                } catch {
+                    completion.finish(
+                        .failure(CCXControllerCLIError.launchFailed(error.localizedDescription)),
+                        collectRemainingOutput: false,
+                        terminateProcess: false
+                    )
+                }
             }
+        } onCancel: {
+            cancellation.cancel()
         }
     }
 
@@ -182,31 +220,153 @@ public enum CCXControllerCLIError: Error, Equatable, LocalizedError {
     case launchFailed(String)
     case processFailed(exitCode: Int32, stdout: String, stderr: String)
     case invalidJSON(String)
+    case timedOut(seconds: Int)
+    case cancelled
 
     public var errorDescription: String? {
         switch self {
         case .executableNotFound:
-            return "CCX controller CLI was not found. Set CCX_CLI, install it under $CCX_HOME/bin/ccx, or add ccx to PATH."
+            return String(
+                localized: "ccx.controller.executableNotFound",
+                defaultValue: "CCX controller CLI was not found. Set CCX_CLI, install it under $CCX_HOME/bin/ccx, or add ccx to PATH."
+            )
         case .notExecutable(let path):
-            return "CCX controller CLI is not executable: \(path)"
+            return String(
+                localized: "ccx.controller.notExecutable",
+                defaultValue: "CCX controller CLI is not executable: \(path)"
+            )
         case .launchFailed(let message):
-            return "Failed to launch CCX controller CLI: \(message)"
-        case .processFailed(let exitCode, _, let stderr):
-            let detail = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-            if detail.isEmpty {
-                return "CCX controller CLI failed with exit code \(exitCode)."
-            }
-            return "CCX controller CLI failed with exit code \(exitCode): \(detail)"
-        case .invalidJSON(let stdout):
-            let detail = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-            if detail.isEmpty {
-                return "CCX controller CLI returned empty JSON."
-            }
-            return "CCX controller CLI returned invalid JSON: \(detail)"
+            return String(
+                localized: "ccx.controller.launchFailed",
+                defaultValue: "Failed to launch CCX controller CLI: \(message)"
+            )
+        case .processFailed(let exitCode, _, _):
+            return String(
+                localized: "ccx.controller.processFailed",
+                defaultValue: "CCX controller CLI failed (exit code \(exitCode))."
+            )
+        case .invalidJSON:
+            return String(
+                localized: "ccx.controller.invalidJSON",
+                defaultValue: "CCX controller CLI returned an unexpected response format."
+            )
+        case .timedOut(let seconds):
+            return String(
+                localized: "ccx.controller.timedOut",
+                defaultValue: "CCX controller CLI timed out after \(seconds) seconds."
+            )
+        case .cancelled:
+            return String(
+                localized: "ccx.controller.cancelled",
+                defaultValue: "CCX controller CLI request was cancelled."
+            )
         }
     }
 }
 
+private final class ProcessCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var completion: ProcessCompletion?
+
+    func set(_ completion: ProcessCompletion) {
+        lock.lock()
+        self.completion = completion
+        lock.unlock()
+    }
+
+    func cancel() {
+        lock.lock()
+        let completion = self.completion
+        lock.unlock()
+        completion?.finish(
+            .failure(CCXControllerCLIError.cancelled),
+            collectRemainingOutput: false,
+            terminateProcess: true
+        )
+    }
+}
+
+// `Process.terminationHandler` and `FileHandle.readabilityHandler` are
+// non-async callbacks, so actor isolation cannot own this state. The lock
+// protects the single-resume guard and all handler cleanup.
+private final class ProcessCompletion: @unchecked Sendable {
+    private let lock = NSLock()
+    private var didFinish = false
+    private var timeoutTask: Task<Void, Never>?
+
+    private let continuation: CheckedContinuation<CCXControllerCLIProcessResult, Error>
+    private let process: Process
+    private let stdoutPipe: Pipe
+    private let stderrPipe: Pipe
+    private let output: ProtectedProcessOutput
+
+    init(
+        continuation: CheckedContinuation<CCXControllerCLIProcessResult, Error>,
+        process: Process,
+        stdoutPipe: Pipe,
+        stderrPipe: Pipe,
+        output: ProtectedProcessOutput
+    ) {
+        self.continuation = continuation
+        self.process = process
+        self.stdoutPipe = stdoutPipe
+        self.stderrPipe = stderrPipe
+        self.output = output
+    }
+
+    func setTimeoutTask(_ task: Task<Void, Never>) {
+        lock.lock()
+        if didFinish {
+            lock.unlock()
+            task.cancel()
+            return
+        }
+        timeoutTask = task
+        lock.unlock()
+    }
+
+    func finish(
+        _ result: Result<CCXControllerCLIProcessResult, Error>,
+        collectRemainingOutput: Bool,
+        terminateProcess: Bool
+    ) {
+        lock.lock()
+        guard !didFinish else {
+            lock.unlock()
+            return
+        }
+        didFinish = true
+        let task = timeoutTask
+        timeoutTask = nil
+        stdoutPipe.fileHandleForReading.readabilityHandler = nil
+        stderrPipe.fileHandleForReading.readabilityHandler = nil
+        if terminateProcess, process.isRunning {
+            process.terminate()
+        }
+        lock.unlock()
+
+        task?.cancel()
+        if collectRemainingOutput {
+            output.appendStdout(stdoutPipe.fileHandleForReading.readDataToEndOfFile())
+            output.appendStderr(stderrPipe.fileHandleForReading.readDataToEndOfFile())
+        }
+
+        switch result {
+        case .success(let processResult):
+            continuation.resume(returning: CCXControllerCLIProcessResult(
+                exitCode: processResult.exitCode,
+                stdout: output.stdout,
+                stderr: output.stderr
+            ))
+        case .failure(let error):
+            continuation.resume(throwing: error)
+        }
+    }
+}
+
+// `readabilityHandler` is a non-async `(FileHandle) -> Void` closure, so actor
+// isolation cannot be used here. `NSLock` serialises all appends, making
+// `@unchecked Sendable` safe for this process bridge.
 private final class ProtectedProcessOutput: @unchecked Sendable {
     private let lock = NSLock()
     private var stdoutData = Data()
