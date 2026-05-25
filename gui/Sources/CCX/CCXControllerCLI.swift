@@ -5,6 +5,7 @@ nonisolated public struct CCXControllerCLI {
         _ executableURL: URL,
         _ arguments: [String]
     ) async throws -> CCXControllerCLIProcessResult
+    typealias TimeoutWaiter = () async throws -> Void
 
     public let executableURL: URL
 
@@ -13,7 +14,12 @@ nonisolated public struct CCXControllerCLI {
 
     public init(executableURL: URL) {
         self.executableURL = executableURL
-        self.runner = CCXControllerCLI.runProcess
+        self.runner = { executableURL, arguments in
+            try await CCXControllerCLI.runProcess(
+                executableURL: executableURL,
+                arguments: arguments
+            )
+        }
     }
 
     init(
@@ -22,6 +28,20 @@ nonisolated public struct CCXControllerCLI {
     ) {
         self.executableURL = executableURL
         self.runner = runner
+    }
+
+    init(
+        executableURL: URL,
+        timeoutWaiter: @escaping TimeoutWaiter
+    ) {
+        self.executableURL = executableURL
+        self.runner = { executableURL, arguments in
+            try await CCXControllerCLI.runProcess(
+                executableURL: executableURL,
+                arguments: arguments,
+                timeoutWaiter: timeoutWaiter
+            )
+        }
     }
 
     public static func resolveExecutable(
@@ -88,7 +108,8 @@ nonisolated public struct CCXControllerCLI {
 
     private static func runProcess(
         executableURL: URL,
-        arguments: [String]
+        arguments: [String],
+        timeoutWaiter: @escaping TimeoutWaiter = defaultTimeoutWaiter
     ) async throws -> CCXControllerCLIProcessResult {
         let cancellation = ProcessCancellation()
         return try await withTaskCancellationHandler {
@@ -132,7 +153,7 @@ nonisolated public struct CCXControllerCLI {
 
                 let timeoutTask = Task {
                     do {
-                        try await Task.sleep(nanoseconds: UInt64(processTimeoutSeconds) * 1_000_000_000)
+                        try await timeoutWaiter()
                     } catch {
                         return
                     }
@@ -153,6 +174,7 @@ nonisolated public struct CCXControllerCLI {
                         )
                         return
                     }
+                    guard !completion.isFinished else { return }
                     try process.run()
                 } catch {
                     completion.finish(
@@ -165,6 +187,10 @@ nonisolated public struct CCXControllerCLI {
         } onCancel: {
             cancellation.cancel()
         }
+    }
+
+    private static func defaultTimeoutWaiter() async throws {
+        try await ContinuousClock().sleep(for: .seconds(processTimeoutSeconds))
     }
 
     private static func executableResult(
@@ -264,6 +290,10 @@ public enum CCXControllerCLIError: Error, Equatable, LocalizedError {
     }
 }
 
+// `withTaskCancellationHandler`'s `onCancel` closure can be invoked from any
+// concurrency context, and `set()` is called from the synchronous body of
+// `withCheckedThrowingContinuation`, so actor isolation cannot own this state.
+// `NSLock` serialises the two-step set/cancel handoff safely.
 private final class ProcessCancellation: @unchecked Sendable {
     private let lock = NSLock()
     private var completion: ProcessCompletion?
@@ -323,6 +353,12 @@ private final class ProcessCompletion: @unchecked Sendable {
         }
         timeoutTask = task
         lock.unlock()
+    }
+
+    var isFinished: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return didFinish
     }
 
     func finish(

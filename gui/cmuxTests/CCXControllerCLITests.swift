@@ -133,13 +133,35 @@ final class CCXControllerCLITests: XCTestCase {
         }
     }
 
+    func testRegisterTimeoutTerminatesProcess() async throws {
+        let executable = try makeFile(named: "ccx", content: "#!/bin/sh\nsleep 60\n")
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+        let cli = CCXControllerCLI(executableURL: executable, timeoutWaiter: {})
+
+        do {
+            _ = try await cli.register(
+                canonicalRepo: URL(fileURLWithPath: "/repo", isDirectory: true),
+                taskSourceFile: URL(fileURLWithPath: "/repo/z/tasks.md")
+            )
+            XCTFail("register should time out")
+        } catch let error as CCXControllerCLIError {
+            XCTAssertEqual(error, .timedOut(seconds: 120))
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
+
     private func makeExecutable(named name: String, inSubdirectory subdirectory: String? = nil) throws -> URL {
         let file = try makeFile(named: name, inSubdirectory: subdirectory)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
         return file
     }
 
-    private func makeFile(named name: String, inSubdirectory subdirectory: String? = nil) throws -> URL {
+    private func makeFile(
+        named name: String,
+        inSubdirectory subdirectory: String? = nil,
+        content: String = "#!/bin/sh\n"
+    ) throws -> URL {
         let directory: URL
         if let subdirectory {
             directory = tempDirectory().appendingPathComponent(subdirectory, isDirectory: true)
@@ -148,7 +170,7 @@ final class CCXControllerCLITests: XCTestCase {
         }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let file = directory.appendingPathComponent(name)
-        try Data("#!/bin/sh\n".utf8).write(to: file)
+        try Data(content.utf8).write(to: file)
         return file
     }
 
