@@ -355,6 +355,40 @@ final class CCXProjectPickerTests: XCTestCase {
         XCTAssertFalse(viewModel.errorMessage?.contains("120") ?? true)
     }
 
+    func testRegistrationViewModelShowsSafeMessageForOtherCLIErrors() async throws {
+        let repo = try temporaryDirectory()
+        try FileManager.default.createDirectory(
+            at: repo.appendingPathComponent(".git", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        let taskSource = try makeFile(named: "tasks.md", in: repo)
+        let errors: [CCXControllerCLIError] = [
+            .invalidJSON("private response"),
+            .cancelled,
+        ]
+
+        for error in errors {
+            let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, _ in
+                throw error
+            }
+            let viewModel = CCXProjectRegistrationViewModel(
+                form: CCXProjectRegistrationFormState(
+                    repositoryPath: repo.path,
+                    taskSourceFilePath: taskSource.path
+                ),
+                cliProvider: { .success(cli) }
+            )
+
+            let registered = await viewModel.submit()
+
+            XCTAssertNil(registered)
+            XCTAssertEqual(
+                viewModel.errorMessage,
+                "Could not register the project. Check the selected repository and task source, then try again."
+            )
+        }
+    }
+
     func testRegistrationViewModelIgnoresDuplicateSubmitWhileRegistering() async throws {
         let repo = try temporaryDirectory()
         try FileManager.default.createDirectory(

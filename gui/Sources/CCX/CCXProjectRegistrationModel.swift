@@ -163,25 +163,15 @@ final class CCXProjectRegistrationViewModel {
     }
 
     private static func message(for error: Error) -> String {
-        if case CCXControllerCLIError.executableNotFound = error {
-            return String(localized: "ccx.projectRegistration.error.cliUnavailable",
-                          defaultValue: "CCX controller CLI is not available. Check the CCX installation, then try again.")
-        }
-        if case CCXControllerCLIError.notExecutable = error {
-            return String(localized: "ccx.projectRegistration.error.cliUnavailable",
-                          defaultValue: "CCX controller CLI is not available. Check the CCX installation, then try again.")
-        }
-        if case CCXControllerCLIError.launchFailed = error {
-            return String(localized: "ccx.projectRegistration.error.cliUnavailable",
-                          defaultValue: "CCX controller CLI is not available. Check the CCX installation, then try again.")
-        }
-        if case CCXControllerCLIError.processFailed = error {
-            return String(localized: "ccx.projectRegistration.error.registerFailed",
-                          defaultValue: "Could not register the project. Check the selected repository and task source, then try again.")
-        }
-        if case CCXControllerCLIError.timedOut = error {
-            return String(localized: "ccx.projectRegistration.error.registerFailed",
-                          defaultValue: "Could not register the project. Check the selected repository and task source, then try again.")
+        if let cliError = error as? CCXControllerCLIError {
+            switch cliError {
+            case .executableNotFound, .notExecutable, .launchFailed:
+                return String(localized: "ccx.projectRegistration.error.cliUnavailable",
+                              defaultValue: "CCX controller CLI is not available. Check the CCX installation, then try again.")
+            case .processFailed, .invalidJSON, .timedOut, .cancelled:
+                return String(localized: "ccx.projectRegistration.error.registerFailed",
+                              defaultValue: "Could not register the project. Check the selected repository and task source, then try again.")
+            }
         }
         return error.localizedDescription
     }
