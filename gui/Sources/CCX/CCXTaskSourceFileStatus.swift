@@ -78,7 +78,7 @@ struct CCXTaskSourceFileStatus: Equatable, Sendable {
             self.modifiedAt = attributes[.modificationDate] as? Date
         } catch {
             ccxTaskSourceLogger.warning(
-                "Could not read task source file at \(trimmedPath, privacy: .private): \(error.localizedDescription, privacy: .public)"
+                "Could not read task source file at \(trimmedPath, privacy: .private): \(error.localizedDescription, privacy: .private)"
             )
             self.kind = .unreadable
             self.modifiedAt = nil
