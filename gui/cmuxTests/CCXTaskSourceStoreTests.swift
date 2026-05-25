@@ -81,6 +81,48 @@ final class CCXTaskSourceStoreTests: XCTestCase {
         XCTAssertFalse(store.isDirty)
     }
 
+    func testSavePreservesWorkItemSelectionAfterLineShift() async {
+        var invocations = 0
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, arguments, _ in
+                invocations += 1
+                if arguments.contains("read") {
+                    return .success(Self.result(stdout: """
+                    {
+                      "project_id": "p_123",
+                      "path": "/repo/z/tasks.md",
+                      "content": "- [ ] First\\n- [ ] Second\\n",
+                      "hash": "hash-1",
+                      "mtime": "2026-05-26T00:00:00Z",
+                      "warning": null
+                    }
+                    """))
+                }
+                return .success(Self.result(stdout: """
+                {
+                  "project_id": "p_123",
+                  "path": "/repo/z/tasks.md",
+                  "hash": "hash-2",
+                  "mtime": "2026-05-26T00:00:01Z",
+                  "bytes_written": 29,
+                  "warning": null
+                }
+                """))
+            })
+        }
+
+        await store.load()
+        let selectedId = store.workItemCandidates[1].id
+        store.selectedWorkItemCandidateId = selectedId
+        store.draftContent = "# New heading\n- [ ] First\n- [ ] Second\n"
+        await store.save()
+
+        XCTAssertEqual(invocations, 2)
+        XCTAssertEqual(store.selectedWorkItemCandidateId, selectedId)
+        XCTAssertEqual(store.selectedWorkItemCandidate?.displayText, "Second")
+        XCTAssertFalse(store.isDirty)
+    }
+
     func testSaveConflictKeepsDraft() async {
         var invocations = 0
         let store = CCXTaskSourceStore(projectId: "p_123") {
