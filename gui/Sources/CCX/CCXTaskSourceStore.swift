@@ -17,6 +17,7 @@ final class CCXTaskSourceStore {
     private(set) var composerStatusMessage: String?
     var composerInput = ""
     var desiredTaskFormat = "- [ ] <actionable task title>\n  - context: <why this matters>\n  - acceptance: <how to verify it>"
+    private var cachedOrchestratorSessionId: String?
 
     @ObservationIgnored
     private let projectId: String
@@ -143,11 +144,14 @@ final class CCXTaskSourceStore {
         do {
             let cli = try cli()
             let sessionId: String
-            if let orchestratorSessionId, !orchestratorSessionId.isEmpty {
+            if let cachedOrchestratorSessionId {
+                sessionId = cachedOrchestratorSessionId
+            } else if let orchestratorSessionId, !orchestratorSessionId.isEmpty {
                 sessionId = orchestratorSessionId
             } else {
                 sessionId = try await cli.startOrchestrator(projectId: project.projectId).agentSessionId
             }
+            cachedOrchestratorSessionId = sessionId
             let prompt = Self.orchestratorPrompt(
                 request: request,
                 project: project,

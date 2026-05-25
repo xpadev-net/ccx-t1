@@ -13,7 +13,7 @@ use crate::config::project_config::ProjectConfig;
 use crate::config::{ccx_home, project_dir};
 use crate::domain::event::{generate_id, Actor, AgentSessionStoppedPayload, Event, EventData};
 use crate::error::CcxError;
-use crate::persistence::jsonl::append_event_to_dir;
+use crate::persistence::jsonl::{append_event_to_dir, read_events_from_dir};
 use crate::persistence::sqlite::open_db;
 
 // ---------------------------------------------------------------------------
@@ -46,9 +46,14 @@ fn start_orchestrator_with_adapters(
     tmux: &dyn TmuxAdapter,
     cmux: &dyn crate::agent_runtime::cmux_adapter::CmuxAdapter,
 ) -> Result<(), CcxError> {
-    let session_id = generate_id().to_string();
     let project_dir = home.join("projects").join(&args.project_id);
     let config = load_project_config_from_dir(&project_dir, &args.project_id)?;
+    if let Some(existing) = active_orchestrator_session_id(&project_dir)? {
+        print_start_orchestrator_reused_result(&args, &existing)?;
+        return Ok(());
+    }
+
+    let session_id = generate_id().to_string();
     let envs = build_agent_envs(&AgentEnvInput {
         project_id: &args.project_id,
         work_execution_id: None,
@@ -99,6 +104,47 @@ fn start_orchestrator_with_adapters(
         );
     }
     Ok(())
+}
+
+fn print_start_orchestrator_reused_result(
+    args: &StartOrchestratorArgs,
+    session_id: &str,
+) -> Result<(), CcxError> {
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "agent_session_id": session_id,
+                "project_id": args.project_id,
+                "role": "orchestrator",
+                "status": "existing",
+            }))?
+        );
+    } else {
+        println!("agent_session_id: {session_id}  (existing orchestrator)");
+    }
+    Ok(())
+}
+
+fn active_orchestrator_session_id(project_dir: &Utf8Path) -> Result<Option<String>, CcxError> {
+    let events = read_events_from_dir(project_dir)?;
+    let mut stopped = std::collections::HashSet::new();
+    for event in events.iter().rev() {
+        match &event.data {
+            EventData::AgentSessionStopped(payload) => {
+                stopped.insert(payload.agent_session_id.clone());
+            }
+            EventData::AgentSessionCreated(payload)
+                if payload.role == "orchestrator"
+                    && payload.work_execution_id.is_none()
+                    && !stopped.contains(&payload.agent_session_id) =>
+            {
+                return Ok(Some(payload.agent_session_id.clone()));
+            }
+            _ => {}
+        }
+    }
+    Ok(None)
 }
 
 fn load_project_config_from_dir(
@@ -574,6 +620,7 @@ mod tests {
     struct CaptureTmuxAdapter {
         envs: Mutex<Option<HashMap<String, String>>>,
         cwd: Mutex<Option<PathBuf>>,
+        created: Mutex<Vec<String>>,
         killed: Mutex<Vec<String>>,
     }
 
@@ -582,6 +629,7 @@ mod tests {
             Self {
                 envs: Mutex::new(None),
                 cwd: Mutex::new(None),
+                created: Mutex::new(Vec::new()),
                 killed: Mutex::new(Vec::new()),
             }
         }
@@ -590,10 +638,11 @@ mod tests {
     impl TmuxAdapter for CaptureTmuxAdapter {
         fn create_session(
             &self,
-            _session_id: &str,
+            session_id: &str,
             cwd: &Path,
             envs: &HashMap<String, String>,
         ) -> Result<(), CcxError> {
+            self.created.lock().unwrap().push(session_id.to_string());
             *self.cwd.lock().unwrap() = Some(cwd.to_path_buf());
             *self.envs.lock().unwrap() = Some(envs.clone());
             Ok(())
@@ -762,6 +811,44 @@ mod tests {
                         && payload.cwd == "/repos/myproject"
             )
         }));
+    }
+
+    #[test]
+    fn start_orchestrator_reuses_existing_active_session() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
+        seed_project(&home).unwrap();
+        let tmux = CaptureTmuxAdapter::new();
+
+        for _ in 0..2 {
+            start_orchestrator_with_adapters(
+                StartOrchestratorArgs {
+                    project_id: "01JTEST00000000000000000001".into(),
+                    json: true,
+                },
+                &home,
+                "/usr/local/bin/ccx",
+                &tmux,
+                &HeadlessCmuxAdapter,
+            )
+            .unwrap();
+        }
+
+        assert_eq!(tmux.created.lock().unwrap().len(), 1);
+        let project_dir = home.join("projects").join("01JTEST00000000000000000001");
+        let created_events = read_events_from_dir(&project_dir)
+            .unwrap()
+            .into_iter()
+            .filter(|event| {
+                matches!(
+                    &event.data,
+                    EventData::AgentSessionCreated(payload)
+                        if payload.role == "orchestrator"
+                            && payload.work_execution_id.is_none()
+                )
+            })
+            .count();
+        assert_eq!(created_events, 1);
     }
 
     #[test]

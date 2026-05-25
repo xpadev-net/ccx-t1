@@ -275,6 +275,53 @@ final class CCXTaskSourceStoreTests: XCTestCase {
         XCTAssertNil(store.composerErrorMessage)
     }
 
+    func testComposerCachesStartedOrchestratorForImmediateSubsequentSubmit() async {
+        var calls: [[String]] = []
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, arguments, _ in
+                calls.append(arguments)
+                if arguments.contains("start-orchestrator") {
+                    return .success(Self.result(stdout: """
+                    {
+                      "agent_session_id": "sess_started",
+                      "project_id": "p_123",
+                      "role": "orchestrator",
+                      "status": "started"
+                    }
+                    """))
+                }
+                return .success(Self.result(stdout: """
+                {
+                  "session_id": "sess_started",
+                  "status": "sent"
+                }
+                """))
+            })
+        }
+
+        store.composerInput = "First request"
+        await store.submitNaturalLanguageTask(
+            project: Self.project,
+            workExecutions: [],
+            orchestratorSessionId: nil
+        )
+        store.composerInput = "Second request"
+        await store.submitNaturalLanguageTask(
+            project: Self.project,
+            workExecutions: [],
+            orchestratorSessionId: nil
+        )
+
+        XCTAssertEqual(
+            calls.filter { $0.contains("start-orchestrator") }.count,
+            1
+        )
+        XCTAssertEqual(
+            calls.filter { $0.contains("prompt") && $0.contains("sess_started") }.count,
+            2
+        )
+    }
+
     func testDiscardRestoresLoadedContent() async {
         let store = CCXTaskSourceStore(projectId: "p_123") {
             .success(Self.cli { _, _, _ in
