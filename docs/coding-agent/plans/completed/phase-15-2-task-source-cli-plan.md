@@ -49,6 +49,7 @@ Repository rule suite status: `docs/coding-agent/rules/` is absent on `master`; 
 - 2026-05-26: Reviewer found a delayed-stdin conflict race; changed write/append to read stdin before validating the expected hash and added delayed-stdin regression tests for both commands.
 - 2026-05-26: Re-review approved the implementation; marked the 15.2 checklist complete and moved this plan to completed.
 - 2026-05-26: `gh-review-hook` reported post-write dirty warning failures, raw read newline drift, ambiguous append offset units, and a verify/write TOCTOU gap; made dirty warnings best-effort, changed raw read to `print!`, renamed append offset JSON field to `append_offset_bytes`, and moved hash verification plus writes under a task-source lock.
+- 2026-05-26: Follow-up `gh-review-hook` pass reported that reads bypassed the task-source lock and that the old non-locking hash helper was production-visible; wrapped reads in a shared lock and made the legacy helper test-only.
 
 ## Decision Log
 

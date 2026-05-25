@@ -93,7 +93,7 @@ struct LoadedTaskSource {
 
 pub fn read(args: ReadArgs) -> Result<(), CcxError> {
     let config = load_project_config(&args.project_id)?;
-    let loaded = load_task_source(&config)?;
+    let loaded = load_task_source_with_read_lock(&config)?;
     let warning = dirty_warning(&config)?;
     if args.json {
         println!(
@@ -175,6 +175,7 @@ pub fn append(args: AppendArgs) -> Result<(), CcxError> {
     Ok(())
 }
 
+#[cfg(test)]
 fn ensure_expected_hash(
     config: &ProjectConfig,
     expected_hash: &str,
@@ -187,6 +188,18 @@ fn ensure_expected_hash(
         )));
     }
     Ok(loaded)
+}
+
+fn load_task_source_with_read_lock(config: &ProjectConfig) -> Result<LoadedTaskSource, CcxError> {
+    let lock_path = task_source_lock_path(config)?;
+    let lock_file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(&lock_path)?;
+    let rw_lock = RwLock::new(lock_file);
+    let _guard = rw_lock.read()?;
+    load_task_source(config)
 }
 
 fn replace_task_source_with_lock(
@@ -220,7 +233,7 @@ fn with_task_source_lock<T>(
     config: &ProjectConfig,
     f: impl FnOnce(LoadedTaskSource) -> Result<T, CcxError>,
 ) -> Result<T, CcxError> {
-    let lock_path = project_dir(&config.project_id)?.join("task-source.lock");
+    let lock_path = task_source_lock_path(config)?;
     let lock_file = OpenOptions::new()
         .create(true)
         .read(true)
@@ -230,6 +243,10 @@ fn with_task_source_lock<T>(
     let _guard = rw_lock.write()?;
     let current = load_task_source(config)?;
     f(current)
+}
+
+fn task_source_lock_path(config: &ProjectConfig) -> Result<Utf8PathBuf, CcxError> {
+    Ok(project_dir(&config.project_id)?.join("task-source.lock"))
 }
 
 fn ensure_loaded_hash(loaded: &LoadedTaskSource, expected_hash: &str) -> Result<(), CcxError> {
