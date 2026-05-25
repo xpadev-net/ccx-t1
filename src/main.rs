@@ -36,6 +36,11 @@ enum Command {
         #[command(subcommand)]
         cmd: cli::WorkCommand,
     },
+    /// Task source file management
+    TaskSource {
+        #[command(subcommand)]
+        cmd: cli::TaskSourceCommand,
+    },
     /// Agent session management
     Agent {
         #[command(subcommand)]
@@ -71,6 +76,7 @@ fn main() {
         Command::Project { cmd } => cli::run_project(cmd),
         Command::Db { cmd } => cli::run_db(cmd),
         Command::Work { cmd } => cli::run_work(cmd),
+        Command::TaskSource { cmd } => cli::run_task_source(cmd),
         Command::Agent { cmd } => cli::run_agent(cmd),
         Command::Lease { cmd } => cli::run_lease(cmd),
         Command::Merge { cmd } => cli::run_merge(cmd),

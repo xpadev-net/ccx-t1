@@ -3,6 +3,7 @@ pub mod db;
 pub mod lease;
 pub mod project;
 pub mod recovery;
+pub mod task_source;
 pub mod work;
 
 use clap::Subcommand;
@@ -70,6 +71,28 @@ pub fn run_work(cmd: WorkCommand) -> Result<(), crate::error::CcxError> {
     match cmd {
         WorkCommand::Create(args) => work::create(args),
         WorkCommand::Cleanup(args) => work::cleanup(args),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// task-source
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Subcommand)]
+pub enum TaskSourceCommand {
+    /// Read a project's registered task source file
+    Read(task_source::ReadArgs),
+    /// Replace a project's registered task source file
+    Write(task_source::WriteArgs),
+    /// Append to a project's registered task source file
+    Append(task_source::AppendArgs),
+}
+
+pub fn run_task_source(cmd: TaskSourceCommand) -> Result<(), crate::error::CcxError> {
+    match cmd {
+        TaskSourceCommand::Read(args) => task_source::read(args),
+        TaskSourceCommand::Write(args) => task_source::write(args),
+        TaskSourceCommand::Append(args) => task_source::append(args),
     }
 }
 
