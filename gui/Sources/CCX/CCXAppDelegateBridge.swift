@@ -29,7 +29,7 @@ enum CCXAppDelegateBridge {
         let args = CCXLaunchArguments.parse()
         guard args.isCCXLaunch else { return }
         appDelegate.openCCXDashboardInPreferredMainWindow(
-            projectId: args.projectId?.isEmpty == false ? args.projectId : nil,
+            projectId: args.projectId,
             debugSource: "ccxLaunchArgs"
         )
     }

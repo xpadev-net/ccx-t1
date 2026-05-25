@@ -21,6 +21,7 @@ public struct CCXLaunchArguments: Sendable {
     ) -> CCXLaunchArguments {
         var projectId: String?
         var isCCXLaunch = false
+        var hasProjectIdArgument = false
         var requestsProjectPicker = false
         var iter = arguments.makeIterator()
         _ = iter.next() // skip executable path
@@ -33,23 +34,29 @@ public struct CCXLaunchArguments: Sendable {
                 requestsProjectPicker = true
             case "--project-id":
                 isCCXLaunch = true
+                hasProjectIdArgument = true
                 projectId = iter.next()
             case let s where s.hasPrefix("--project-id="):
                 isCCXLaunch = true
+                hasProjectIdArgument = true
                 projectId = String(s.dropFirst("--project-id=".count))
             default:
                 continue
             }
         }
-        if projectId?.isEmpty != false, !requestsProjectPicker {
+        var normalizedProjectId = projectId?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalizedProjectId?.isEmpty != false {
+            normalizedProjectId = nil
+        }
+        if normalizedProjectId == nil, !hasProjectIdArgument, !requestsProjectPicker {
             let defaultProjectId = environment["CCX_DEFAULT_PROJECT_ID"]?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if defaultProjectId?.isEmpty == false {
-                projectId = defaultProjectId
+                normalizedProjectId = defaultProjectId
                 isCCXLaunch = true
             }
         }
-        let normalizedProjectId = projectId?.isEmpty == false ? projectId : nil
         return CCXLaunchArguments(projectId: normalizedProjectId, isCCXLaunch: isCCXLaunch)
     }
 }

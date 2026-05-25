@@ -86,7 +86,7 @@ open -a <bundle> --args --project-id <project_id>
 
 To open the picker directly:
 
-```
+```sh
 open -a <bundle> --args --ccx-project-picker
 ```
 
