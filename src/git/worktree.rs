@@ -18,16 +18,18 @@ pub fn create_worktree(
     project_dir: &Utf8Path,
     task_md_path: &Utf8Path,
 ) -> Result<(), CcxError> {
-    let status = std::process::Command::new("git")
+    let output = std::process::Command::new("git")
         .args(["worktree", "add", "-b", branch_name, worktree_path.as_str()])
         .current_dir(repo)
-        .status()
+        .output()
         .map_err(|e| CcxError::Git(format!("failed to run git worktree add: {e}")))?;
 
-    if !status.success() {
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(CcxError::Git(format!(
-            "git worktree add exited with {:?}",
-            status.code()
+            "git worktree add exited with {:?}: {}",
+            output.status.code(),
+            stderr.trim()
         )));
     }
 
@@ -114,11 +116,22 @@ mod tests {
         let pid = "01JTEST00000000000000000001";
         let we_id = "01JTEST00000000000000000002";
 
-        create_worktree(&repo, &wt_path, "ccx/test-branch", pid, we_id, &proj_dir, &task_md)
-            .unwrap();
+        create_worktree(
+            &repo,
+            &wt_path,
+            "ccx/test-branch",
+            pid,
+            we_id,
+            &proj_dir,
+            &task_md,
+        )
+        .unwrap();
 
         assert!(wt_path.exists(), "worktree dir should exist");
-        assert!(wt_path.join(".ccx-task.md").exists(), "symlink should exist");
+        assert!(
+            wt_path.join(".ccx-task.md").exists(),
+            "symlink should exist"
+        );
 
         let output = std::process::Command::new("git")
             .args(["worktree", "list"])
@@ -126,7 +139,10 @@ mod tests {
             .output()
             .unwrap();
         let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(stdout.contains("ccx/test-branch"), "branch should appear in worktree list");
+        assert!(
+            stdout.contains("ccx/test-branch"),
+            "branch should appear in worktree list"
+        );
     }
 
     #[test]
@@ -141,8 +157,16 @@ mod tests {
         let proj_dir = camino::Utf8PathBuf::try_from(tmp_proj.path().to_path_buf()).unwrap();
         let task_md = repo.join("README");
 
-        create_worktree(&repo, &wt_path, "ccx/remove-test", "pid", "we_id", &proj_dir, &task_md)
-            .unwrap();
+        create_worktree(
+            &repo,
+            &wt_path,
+            "ccx/remove-test",
+            "pid",
+            "we_id",
+            &proj_dir,
+            &task_md,
+        )
+        .unwrap();
         assert!(wt_path.exists());
 
         remove_worktree(&repo, &wt_path).unwrap();

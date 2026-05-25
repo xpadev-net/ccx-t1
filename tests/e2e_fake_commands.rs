@@ -450,6 +450,98 @@ fn task_source_json_warns_when_canonical_repo_is_dirty() {
 }
 
 #[test]
+fn work_create_materializes_execution_task_file_and_worktree() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("ccx-home");
+    let repo = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    Command::new("git")
+        .args(["init"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["config", "user.name", "Test User"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    std::fs::write(repo.join("README.md"), "hello\n").unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "initial"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    let tasks = repo.join("tasks.md");
+    std::fs::write(&tasks, "# Phase\n- [ ] Build work create\n").unwrap();
+    let project_id = register_project(&home, &repo, &tasks);
+
+    let (code, stdout, stderr) = run_ccx(
+        &[
+            "work",
+            "create",
+            "--project-id",
+            &project_id,
+            "--source-path",
+            tasks.to_str().unwrap(),
+            "--selector-type",
+            "checkbox",
+            "--selector-value",
+            "L2:- [ ] Build work create",
+            "--display-text",
+            "Build work create",
+            "--json",
+        ],
+        &[],
+        &home,
+    );
+
+    assert_eq!(code, 0, "work create failed: {stderr}");
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let work_execution_id = json["work_execution_id"].as_str().unwrap();
+    let worktree_path = std::path::PathBuf::from(json["worktree_path"].as_str().unwrap());
+    let task_file_path = std::path::PathBuf::from(json["task_file_path"].as_str().unwrap());
+    assert!(worktree_path.exists());
+    assert!(task_file_path.exists());
+    assert!(worktree_path.join(".ccx-task.md").exists());
+    let task_md = std::fs::read_to_string(&task_file_path).unwrap();
+    assert!(task_md.contains("status: assigned"));
+    assert!(task_md.contains("Build work create"));
+
+    let events_raw =
+        std::fs::read_to_string(home.join("projects").join(&project_id).join("events.jsonl"))
+            .unwrap();
+    assert!(events_raw.contains("work_execution_created"));
+    assert!(events_raw.contains("work_execution_task_file_created"));
+    assert!(events_raw.contains("work_execution_state_changed"));
+    assert!(events_raw.contains("branch_created"));
+    assert!(events_raw.contains("worktree_created"));
+
+    let db =
+        rusqlite::Connection::open(home.join("projects").join(&project_id).join("state.sqlite"))
+            .unwrap();
+    let row: (String, String, String) = db
+        .query_row(
+            "SELECT state, branch_name, task_file_path FROM work_executions WHERE work_execution_id = ?1",
+            rusqlite::params![work_execution_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(row.0, "task_file_created");
+    assert_eq!(row.1, json["branch_name"].as_str().unwrap());
+    assert_eq!(row.2, task_file_path.to_str().unwrap());
+}
+
+#[test]
 fn fake_gh_review_hook_exit_0_is_accepted() {
     let fake_hook = fixture_bin_dir().join("gh-review-hook");
     let tmp = tempfile::tempdir().unwrap();
