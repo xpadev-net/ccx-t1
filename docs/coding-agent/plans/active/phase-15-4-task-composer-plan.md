@@ -21,6 +21,7 @@ Quality routing note:
   - `gui/Sources/CCX/CCXTaskSourceStore.swift`
   - `gui/Sources/CCX/CCXTasksView.swift`
   - `gui/Sources/CCX/CCXDashboardView.swift`
+  - `src/cli/agent.rs` (`agent start-orchestrator`, fd-lock admission guard, active session detection, project config loading)
   - `gui/Resources/Localizable.xcstrings`
   - `gui/cmuxTests/CCXControllerCLITests.swift`
   - `gui/cmuxTests/CCXTaskSourceStoreTests.swift`
@@ -31,6 +32,7 @@ Quality routing note:
   - Tasks tab provides a natural-language task composer with a localized submit action.
   - Composer builds an Orchestrator prompt containing the task source file path, canonical repo, current WorkExecution state summary, desired append format, and the user's original request.
   - Composer sends the prompt to an active Orchestrator session when available; otherwise it starts one before prompting.
+  - `agent start-orchestrator` loads project config, detects an existing active Orchestrator session, serializes concurrent admission with fd-lock, and returns a usable session before `agent prompt` is called.
   - Prompt text explicitly instructs the Orchestrator to inspect code, split/detail tasks when useful, update the task source file, and preserve the GUI original request.
   - This PR includes the `z/tasks.md` 15.4 checklist update after validation and subagent review pass.
 - validation:
@@ -43,9 +45,25 @@ Quality routing note:
     kind: test
     detail: Focused Xcode test command covering `CCXControllerCLITests` and `CCXTaskSourceStoreTests`.
   - required: true
+    owner: orchestrator
+    kind: static
+    detail: `rtk cargo clippy --bin ccx` completes with 0 errors for Rust CLI changes; warning cleanup is outside this task scope.
+  - required: true
+    owner: orchestrator
+    kind: test
+    detail: `rtk cargo test start_orchestrator` passes, including the concurrent fd-lock/session-detection regression.
+  - required: true
+    owner: orchestrator
+    kind: test
+    detail: `rtk cargo test prompt_sends` and `rtk cargo test task_source --test e2e_fake_commands` pass for related CLI contracts.
+  - required: true
     owner: reviewer
     kind: review
     detail: Independent harness reviewer verifies implementation, tests, prompt contract, and validation evidence before PR creation.
+  - required: true
+    owner: tester
+    kind: review
+    detail: Verify recorded command output/logs show the required Swift, Rust, static, and orchestrator admission checks passed.
 
 ## Task Waves
 

@@ -16,7 +16,10 @@ final class CCXTaskSourceStore {
     private(set) var composerErrorMessage: String?
     private(set) var composerStatusMessage: String?
     var composerInput = ""
-    var desiredTaskFormat = "- [ ] <actionable task title>\n  - context: <why this matters>\n  - acceptance: <how to verify it>"
+    var desiredTaskFormat = String(
+        localized: "ccx.defaultTaskFormat",
+        defaultValue: "- [ ] <actionable task title>\n  - context: <why this matters>\n  - acceptance: <how to verify it>"
+    )
 
     @ObservationIgnored
     private let projectId: String

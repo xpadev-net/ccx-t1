@@ -52,6 +52,7 @@ fn start_orchestrator_with_adapters(
     std::fs::create_dir_all(&project_dir)?;
     let lock_file = std::fs::OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(project_dir.join("orchestrator.lock"))?;
