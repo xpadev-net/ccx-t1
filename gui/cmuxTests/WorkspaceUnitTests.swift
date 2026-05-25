@@ -2470,6 +2470,26 @@ final class WorkspaceCCXDashboardSwitchTests: XCTestCase {
         XCTAssertEqual(manager.selectedWorkspace?.id, firstWorkspace.id)
         XCTAssertEqual(firstWorkspace.panels.values.compactMap { $0 as? CCXDashboardPanel }.count, 1)
     }
+
+    func testOpenCCXProjectUpdatesReusedWorkspaceTitleFromSummary() throws {
+        let manager = TabManager()
+        let firstWorkspace = try XCTUnwrap(manager.openCCXProjectWorkspace(projectId: "p_retitle", origin: "test"))
+        let workspaceCount = manager.tabs.count
+        let project = CCXProjectSummary(
+            projectId: "p_retitle",
+            displaySlug: "human-readable-repo",
+            canonicalRepo: "/tmp/human-readable-repo",
+            taskSourceFile: "/tmp/human-readable-repo/z/tasks.md",
+            createdAt: "2026-05-25T00:00:00Z"
+        )
+
+        let secondWorkspace = try XCTUnwrap(manager.openCCXProjectWorkspace(project: project, origin: "test"))
+
+        XCTAssertTrue(firstWorkspace === secondWorkspace)
+        XCTAssertEqual(manager.tabs.count, workspaceCount)
+        XCTAssertEqual(secondWorkspace.customTitle, "human-readable-repo")
+        XCTAssertEqual(secondWorkspace.title, "human-readable-repo")
+    }
 }
 
 final class WorkspacePlacementSettingsTests: XCTestCase {

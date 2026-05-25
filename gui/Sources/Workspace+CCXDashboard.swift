@@ -182,6 +182,7 @@ extension TabManager {
 
         if let existing = tabs.first(where: { $0.hasCCXProject(projectId: trimmedProjectId) }) {
             selectWorkspace(existing)
+            existing.setCustomTitle(title)
             _ = existing.ensureCCXDashboardSurface(projectId: trimmedProjectId, origin: origin)
             return existing
         }

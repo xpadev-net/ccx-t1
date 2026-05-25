@@ -308,7 +308,7 @@ struct CCXTaskSourceFileStatus: Equatable, Sendable {
         case directory
         case notMarkdown
         case ready
-        case unreadable(String)
+        case unreadable
     }
 
     let path: String
@@ -371,7 +371,7 @@ struct CCXTaskSourceFileStatus: Equatable, Sendable {
             ccxTaskSourceLogger.warning(
                 "Could not read task source file at \(trimmedPath, privacy: .private): \(error.localizedDescription, privacy: .public)"
             )
-            self.kind = .unreadable(error.localizedDescription)
+            self.kind = .unreadable
             self.modifiedAt = nil
         }
     }
