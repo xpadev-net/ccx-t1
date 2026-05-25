@@ -2689,6 +2689,7 @@
 					Carbon,
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.cmuxterm.ccx-cmux.debug";
+				PRODUCT_MODULE_NAME = cmux_DEV;
 				PRODUCT_NAME = "ccx-cmux DEV";
 				SPARKLE_PUBLIC_KEY = "avjcgKibf1FTvhIjLBxhd+0HSpsXU4D0IGlVk8cgqRc=";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -2730,6 +2731,7 @@
 					Carbon,
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.cmuxterm.ccx-cmux";
+				PRODUCT_MODULE_NAME = cmux;
 				PRODUCT_NAME = "ccx-cmux";
 				SPARKLE_PUBLIC_KEY = "avjcgKibf1FTvhIjLBxhd+0HSpsXU4D0IGlVk8cgqRc=";
 				SWIFT_EMIT_LOC_STRINGS = YES;

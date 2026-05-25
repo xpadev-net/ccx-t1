@@ -126,7 +126,10 @@ final class CCXProjectPickerTests: XCTestCase {
         let panel = CCXDashboardPanel(projectId: nil, ccxHome: home, projectsStore: CCXProjectsStore(ccxHome: home))
 
         XCTAssertNil(panel.projectStore)
-        XCTAssertEqual(panel.displayTitle, "CCX Projects")
+        XCTAssertEqual(
+            panel.displayTitle,
+            String(localized: "ccx.projectPicker.title", defaultValue: "CCX Projects")
+        )
     }
 
     func testPanelWithProjectUsesDashboardMode() {
@@ -379,14 +382,17 @@ final class CCXProjectPickerTests: XCTestCase {
         XCTAssertFalse(didUnregister)
         XCTAssertEqual(
             viewModel.errorMessage,
-            "Could not unregister the project. Check the project list, then try again."
+            String(
+                localized: "ccx.projectUnregister.error.generic",
+                defaultValue: "Could not unregister the project. Check the project list, then try again."
+            )
         )
         XCTAssertFalse(viewModel.errorMessage?.contains("private") ?? true)
         XCTAssertNil(viewModel.pendingProject)
         XCTAssertFalse(viewModel.isSubmitting)
     }
 
-    func testUnregistrationViewModelClaimPreventsDialogDismissFromCancellingPendingProject() async {
+    func testUnregistrationViewModelClaimPreventsDialogDismissFromCancellingPendingProject() async throws {
         let project = CCXProjectSummary(
             projectId: "p_remove",
             displaySlug: "repo",
@@ -443,7 +449,10 @@ final class CCXProjectPickerTests: XCTestCase {
         XCTAssertNil(registered)
         XCTAssertEqual(
             viewModel.errorMessage,
-            "Could not register the project. Check the selected repository and task source, then try again."
+            String(
+                localized: "ccx.projectRegistration.error.registerFailed",
+                defaultValue: "Could not register the project. Check the selected repository and task source, then try again."
+            )
         )
         XCTAssertFalse(viewModel.isSubmitting)
     }
@@ -494,7 +503,10 @@ final class CCXProjectPickerTests: XCTestCase {
         XCTAssertNil(registered)
         XCTAssertEqual(
             viewModel.errorMessage,
-            "CCX controller CLI is not available. Check the CCX installation, then try again."
+            String(
+                localized: "ccx.projectRegistration.error.cliUnavailable",
+                defaultValue: "CCX controller CLI is not available. Check the CCX installation, then try again."
+            )
         )
         XCTAssertFalse(viewModel.errorMessage?.contains("/Users/alice") ?? true)
     }
@@ -519,7 +531,10 @@ final class CCXProjectPickerTests: XCTestCase {
         XCTAssertNil(registered)
         XCTAssertEqual(
             viewModel.errorMessage,
-            "CCX controller CLI is not available. Check the CCX installation, then try again."
+            String(
+                localized: "ccx.projectRegistration.error.cliUnavailable",
+                defaultValue: "CCX controller CLI is not available. Check the CCX installation, then try again."
+            )
         )
         XCTAssertFalse(viewModel.errorMessage?.contains("CCX_CLI") ?? true)
         XCTAssertFalse(viewModel.errorMessage?.contains("CCX_HOME") ?? true)
@@ -549,7 +564,10 @@ final class CCXProjectPickerTests: XCTestCase {
         XCTAssertNil(registered)
         XCTAssertEqual(
             viewModel.errorMessage,
-            "Could not register the project. Check the selected repository and task source, then try again."
+            String(
+                localized: "ccx.projectRegistration.error.registerFailed",
+                defaultValue: "Could not register the project. Check the selected repository and task source, then try again."
+            )
         )
         XCTAssertFalse(viewModel.errorMessage?.contains("120") ?? true)
     }
@@ -583,7 +601,10 @@ final class CCXProjectPickerTests: XCTestCase {
             XCTAssertNil(registered)
             XCTAssertEqual(
                 viewModel.errorMessage,
-                "Could not register the project. Check the selected repository and task source, then try again."
+                String(
+                    localized: "ccx.projectRegistration.error.registerFailed",
+                    defaultValue: "Could not register the project. Check the selected repository and task source, then try again."
+                )
             )
         }
     }
@@ -611,7 +632,10 @@ final class CCXProjectPickerTests: XCTestCase {
         XCTAssertNil(registered)
         XCTAssertEqual(
             viewModel.errorMessage,
-            "Could not register the project. Check the selected repository and task source, then try again."
+            String(
+                localized: "ccx.projectRegistration.error.registerFailed",
+                defaultValue: "Could not register the project. Check the selected repository and task source, then try again."
+            )
         )
         XCTAssertFalse(viewModel.errorMessage?.contains("private.internal.registration") ?? true)
     }
