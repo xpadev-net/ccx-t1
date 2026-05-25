@@ -2410,6 +2410,26 @@ final class WorkspaceCCXDashboardSwitchTests: XCTestCase {
         XCTAssertEqual(projectPanel.projectStore?.projectId, "p_456")
         XCTAssertNotNil(workspace.surfaceIdFromPanelId(projectPanel.id))
     }
+
+    func testSwitchToSameCCXDashboardProjectKeepsExistingPanel() throws {
+        let workspace = Workspace()
+        let paneId = try XCTUnwrap(workspace.bonsplitController.focusedPaneId)
+        let originalPanel = try XCTUnwrap(workspace.newCCXDashboardSurface(
+            inPane: paneId,
+            projectId: "p_same",
+            focus: true,
+            origin: "test"
+        ))
+        let originalTabId = try XCTUnwrap(workspace.surfaceIdFromPanelId(originalPanel.id))
+        let panelCountBeforeSwitch = workspace.panels.count
+
+        let switchedPanel = try XCTUnwrap(workspace.switchToCCXDashboard(projectId: " p_same ", origin: "test"))
+
+        XCTAssertTrue(switchedPanel === originalPanel)
+        XCTAssertEqual(workspace.panels.count, panelCountBeforeSwitch)
+        XCTAssertEqual(workspace.surfaceIdFromPanelId(switchedPanel.id), originalTabId)
+        XCTAssertEqual(workspace.panelIdFromSurfaceId(originalTabId), originalPanel.id)
+    }
 }
 
 final class WorkspacePlacementSettingsTests: XCTestCase {

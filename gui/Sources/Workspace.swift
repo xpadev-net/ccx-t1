@@ -13333,6 +13333,7 @@ final class Workspace: Identifiable, ObservableObject {
             }
         }
         for paneId in bonsplitController.allPaneIds {
+            if paneId == bonsplitController.focusedPaneId { continue }
             for tab in bonsplitController.tabs(inPane: paneId) {
                 if let panelId = panelIdFromSurfaceId(tab.id),
                    panels[panelId] is CCXDashboardPanel {
