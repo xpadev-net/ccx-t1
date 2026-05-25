@@ -65,14 +65,14 @@ public struct CCXDashboardView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .onAppear {
-            startStores()
+            startDashboardStores()
         }
-        .onChange(of: store.projectId) { _, _ in
-            startStores()
+        .onChange(of: ObjectIdentifier(store)) { _, _ in
+            store.start()
         }
     }
 
-    private func startStores() {
+    private func startDashboardStores() {
         store.start()
         projectsStore?.start()
     }
