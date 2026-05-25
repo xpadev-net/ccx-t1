@@ -20,9 +20,8 @@ import Foundation
 enum CCXAppDelegateBridge {
     static func presentDashboardIfRequested(on appDelegate: AppDelegate) {
         let args = CCXLaunchArguments.parse()
-        guard let projectId = args.projectId, !projectId.isEmpty else { return }
         appDelegate.openCCXDashboardInPreferredMainWindow(
-            projectId: projectId,
+            projectId: args.projectId?.isEmpty == false ? args.projectId : nil,
             debugSource: "ccxLaunchArgs"
         )
     }
@@ -36,7 +35,7 @@ extension AppDelegate {
     /// diagnostic in the unified log.
     @discardableResult
     func openCCXDashboardInPreferredMainWindow(
-        projectId: String,
+        projectId: String?,
         debugSource: String = "unspecified"
     ) -> Bool {
         let context: MainWindowContext? = {
@@ -48,9 +47,9 @@ extension AppDelegate {
         }()
         guard let context else {
             NSLog("ccx.dashboardOpen.failed reason=no_main_window_context source=%@ projectId=%@",
-                  debugSource, projectId)
+                  debugSource, projectId ?? "<picker>")
 #if DEBUG
-            cmuxDebugLog("ccx.dashboardOpen.failed reason=no_main_window_context source=\(debugSource) projectId=\(projectId)")
+            cmuxDebugLog("ccx.dashboardOpen.failed reason=no_main_window_context source=\(debugSource) projectId=\(projectId ?? "<picker>")")
 #endif
             return false
         }
@@ -64,15 +63,15 @@ extension AppDelegate {
         guard let paneId = workspace.bonsplitController.focusedPaneId
             ?? workspace.bonsplitController.allPaneIds.first else {
             NSLog("ccx.dashboardOpen.failed reason=no_pane source=%@ projectId=%@ workspace=%@",
-                  debugSource, projectId, workspace.id.uuidString)
+                  debugSource, projectId ?? "<picker>", workspace.id.uuidString)
 #if DEBUG
-            cmuxDebugLog("ccx.dashboardOpen.failed reason=no_pane source=\(debugSource) projectId=\(projectId) workspace=\(workspace.id.uuidString)")
+            cmuxDebugLog("ccx.dashboardOpen.failed reason=no_pane source=\(debugSource) projectId=\(projectId ?? "<picker>") workspace=\(workspace.id.uuidString)")
 #endif
             return false
         }
 
 #if DEBUG
-        cmuxDebugLog("ccx.dashboardOpen source=\(debugSource) projectId=\(projectId)")
+        cmuxDebugLog("ccx.dashboardOpen source=\(debugSource) projectId=\(projectId ?? "<picker>")")
 #endif
         return workspace.newCCXDashboardSurface(
             inPane: paneId,

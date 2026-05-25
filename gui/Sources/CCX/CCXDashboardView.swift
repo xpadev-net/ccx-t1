@@ -5,6 +5,8 @@ import SwiftUI
 /// from a `CCXProjectStore` that mirrors the Rust controller's read model.
 public struct CCXDashboardView: View {
     @ObservedObject var store: CCXProjectStore
+    let projectsStore: CCXProjectsStore?
+    let onOpenProject: (CCXProjectSummary) -> Void
     @State private var selection: Tab = .overview
 
     public enum Tab: String, CaseIterable, Identifiable {
@@ -25,8 +27,14 @@ public struct CCXDashboardView: View {
         }
     }
 
-    public init(store: CCXProjectStore) {
+    public init(
+        store: CCXProjectStore,
+        projectsStore: CCXProjectsStore? = nil,
+        onOpenProject: @escaping (CCXProjectSummary) -> Void = { _ in }
+    ) {
         self.store = store
+        self.projectsStore = projectsStore
+        self.onOpenProject = onOpenProject
     }
 
     public var body: some View {
@@ -56,31 +64,73 @@ public struct CCXDashboardView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .onAppear { store.start() }
+        .onAppear {
+            store.start()
+            projectsStore?.start()
+        }
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if let project = store.project {
-                Text(project.displaySlug)
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                Text(project.canonicalRepo)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text(String(localized: "ccx.dashboard.loading", defaultValue: "Loading project…"))
-                    .font(.title2)
-                    .foregroundStyle(.secondary)
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                if let project = store.project {
+                    Text(project.displaySlug)
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                    Text(project.canonicalRepo)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(String(localized: "ccx.dashboard.loading", defaultValue: "Loading project…"))
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                }
+                if let err = store.lastRefreshError {
+                    Text(err)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
             }
-            if let err = store.lastRefreshError {
-                Text(err)
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+            Spacer(minLength: 12)
+            if let projectsStore {
+                CCXProjectSwitchMenu(
+                    projectsStore: projectsStore,
+                    currentProjectId: store.project?.projectId,
+                    onOpenProject: onOpenProject
+                )
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
+    }
+}
+
+private struct CCXProjectSwitchMenu: View {
+    @Bindable var projectsStore: CCXProjectsStore
+    let currentProjectId: String?
+    let onOpenProject: (CCXProjectSummary) -> Void
+
+    var body: some View {
+        Menu {
+            if projectsStore.projects.isEmpty {
+                Text(String(localized: "ccx.projectPicker.empty", defaultValue: "No CCX projects registered."))
+            } else {
+                ForEach(projectsStore.projects) { project in
+                    Button {
+                        onOpenProject(project)
+                    } label: {
+                        Text(project.displaySlug)
+                    }
+                    .disabled(project.projectId == currentProjectId)
+                }
+            }
+        } label: {
+            Label(
+                String(localized: "ccx.dashboard.switchProject", defaultValue: "Switch project"),
+                systemImage: "rectangle.2.swap"
+            )
+        }
+        .menuStyle(.button)
     }
 }
 

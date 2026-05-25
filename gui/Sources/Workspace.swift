@@ -13194,9 +13194,10 @@ final class Workspace: Identifiable, ObservableObject {
     @discardableResult
     func newCCXDashboardSurface(
         inPane paneId: PaneID,
-        projectId: String,
+        projectId: String?,
         focus: Bool? = nil,
-        targetIndex: Int? = nil
+        targetIndex: Int? = nil,
+        origin: String = "ccx_launch_args"
     ) -> CCXDashboardPanel? {
         let shouldFocusNewTab = focus ?? (bonsplitController.focusedPaneId == paneId)
         let previousFocusedPanelId = focusedPanelId
@@ -13233,7 +13234,7 @@ final class Workspace: Identifiable, ObservableObject {
             panel.id,
             paneId: paneId,
             kind: Self.cmuxEventSurfaceKind(panel),
-            origin: "ccx_launch_args",
+            origin: origin,
             focused: shouldFocusNewTab
         )
 
