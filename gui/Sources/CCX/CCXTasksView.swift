@@ -14,6 +14,7 @@ public struct CCXTasksView: View {
             VStack(alignment: .leading, spacing: 12) {
                 if let project {
                     CCXTaskSourcePanel(project: project)
+                        .id(project.projectId)
                 } else {
                     placeholderView(String(localized: "ccx.tasks.loading",
                                            defaultValue: "Loading task source..."))
@@ -126,7 +127,7 @@ private struct CCXTaskSourcePanel: View {
                     Label(String(localized: "ccx.tasks.action.reload", defaultValue: "Reload"),
                           systemImage: "arrow.clockwise")
                 }
-                .disabled(sourceStore.isDirty || sourceStore.isLoading || sourceStore.isSaving)
+                .disabled(sourceStore.isDirty || sourceStore.isLoading || sourceStore.isSaving || !status.canOpen)
 
                 Button {
                     sourceStore.discardChanges()

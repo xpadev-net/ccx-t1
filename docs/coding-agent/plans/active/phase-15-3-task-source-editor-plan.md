@@ -32,7 +32,7 @@ Quality routing note:
   - `CCXTaskSourceStore` loads content/hash/mtime, tracks draft edits, saves with `expected-hash`, supports reload/discard, and reports hash conflicts without overwriting local draft.
   - Tasks tab shows a Markdown editing surface plus Save, Reload, and Discard controls wired to the store.
   - Save conflict surfaces a clear non-destructive message and leaves draft content intact for user resolution.
-  - `z/tasks.md` marks 15.3 and subitems complete only after validation and review pass.
+  - This PR includes the `z/tasks.md` 15.3 checklist update after validation and subagent review pass.
 - validation:
   - required: true
     owner: orchestrator

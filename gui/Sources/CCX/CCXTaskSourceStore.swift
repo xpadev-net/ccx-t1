@@ -145,13 +145,13 @@ final class CCXTaskSourceStore {
             switch cliError {
             case .executableNotFound, .notExecutable, .launchFailed:
                 return String(localized: "ccx.tasks.editor.error.cliUnavailable",
-                              defaultValue: "CCX controller CLI is not available.")
+                              defaultValue: "CCX controller CLI is not available. Check the CCX installation, then try again.")
             case .processFailed, .invalidJSON, .timedOut, .cancelled:
                 return String(localized: "ccx.tasks.editor.error.generic",
-                              defaultValue: "Could not update the task source.")
+                              defaultValue: "Could not update the task source. Reload, check the file, then try again.")
             }
         }
         return String(localized: "ccx.tasks.editor.error.generic",
-                      defaultValue: "Could not update the task source.")
+                      defaultValue: "Could not update the task source. Reload, check the file, then try again.")
     }
 }
