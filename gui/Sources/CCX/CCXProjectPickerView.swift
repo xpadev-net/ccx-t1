@@ -40,17 +40,9 @@ public struct CCXProjectPickerView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                Button {
-                    isAddProjectPresented = true
-                } label: {
-                    Label(
-                        String(localized: "ccx.projectPicker.addProject", defaultValue: "Add Project"),
-                        systemImage: "plus"
-                    )
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 6)
+                if !store.projects.isEmpty {
+                    addProjectButton
                 }
-                .buttonStyle(.plain)
             }
             .overlay {
                 if store.projects.isEmpty {
@@ -107,6 +99,20 @@ public struct CCXProjectPickerView: View {
         .padding(.vertical, 4)
     }
 
+    private var addProjectButton: some View {
+        Button {
+            isAddProjectPresented = true
+        } label: {
+            Label(
+                String(localized: "ccx.projectPicker.addProject", defaultValue: "Add Project"),
+                systemImage: "plus"
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 6)
+        }
+        .buttonStyle(.plain)
+    }
+
     private var emptyState: some View {
         VStack(spacing: 8) {
             Image(systemName: "tray")
@@ -115,9 +121,10 @@ public struct CCXProjectPickerView: View {
             Text(String(localized: "ccx.projectPicker.empty", defaultValue: "No CCX projects registered."))
                 .font(.callout)
                 .foregroundStyle(.secondary)
+            addProjectButton
+                .frame(width: 180)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .allowsHitTesting(false)
     }
 
     private var addProjectPlaceholder: some View {

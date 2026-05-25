@@ -74,7 +74,7 @@ public struct CCXDashboardView: View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 if let project = store.project {
-                    Text(project.displaySlug)
+                    Text(projectTitle(project))
                         .font(.title2)
                         .fontWeight(.semibold)
                     Text(project.canonicalRepo)
@@ -95,13 +95,19 @@ public struct CCXDashboardView: View {
             if let projectsStore {
                 CCXProjectSwitchMenu(
                     projectsStore: projectsStore,
-                    currentProjectId: store.project?.projectId,
+                    currentProjectId: store.projectId,
                     onOpenProject: onOpenProject
                 )
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
+    }
+
+    private func projectTitle(_ project: CCXProjectSummary) -> String {
+        if !project.displaySlug.isEmpty { return project.displaySlug }
+        if !project.canonicalRepo.isEmpty { return project.canonicalRepo }
+        return project.projectId
     }
 }
 

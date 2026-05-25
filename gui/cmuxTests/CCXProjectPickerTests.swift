@@ -23,6 +23,13 @@ final class CCXProjectPickerTests: XCTestCase {
         XCTAssertNil(args.projectId)
     }
 
+    func testLaunchArgumentsRequestPickerWithCCXProjectPickerFlag() {
+        let args = CCXLaunchArguments.parse(["cmux", "--ccx-project-picker"])
+
+        XCTAssertTrue(args.isCCXLaunch)
+        XCTAssertNil(args.projectId)
+    }
+
     func testLaunchArgumentsRequestDashboardWithProjectId() {
         let args = CCXLaunchArguments.parse(["cmux", "--project-id", "p_1"])
 

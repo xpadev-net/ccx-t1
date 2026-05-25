@@ -30,10 +30,7 @@ enum CCXAppDelegateBridge {
 
 extension AppDelegate {
     /// Open a CCX dashboard tab for `projectId` in a main window. Creates one
-    /// if none exists. Returns `true` on success. Failure branches log via
-    /// `NSLog` (production-visible) and `cmuxDebugLog` (DEBUG-only) so a user
-    /// running `ccx project open <id>` who sees no dashboard can find a
-    /// diagnostic in the unified log.
+    /// if none exists. Returns `true` on success.
     @discardableResult
     func openCCXDashboardInPreferredMainWindow(
         projectId: String?,
@@ -47,8 +44,6 @@ extension AppDelegate {
             return mainWindowContexts.values.first { $0.windowId == windowId }
         }()
         guard let context else {
-            NSLog("ccx.dashboardOpen.failed reason=no_main_window_context source=%@ projectId=%@",
-                  debugSource, projectId ?? "<picker>")
 #if DEBUG
             cmuxDebugLog("ccx.dashboardOpen.failed reason=no_main_window_context source=\(debugSource) projectId=\(projectId ?? "<picker>")")
 #endif
@@ -63,8 +58,6 @@ extension AppDelegate {
             ?? context.tabManager.addWorkspace(workingDirectory: nil, select: true)
         guard let paneId = workspace.bonsplitController.focusedPaneId
             ?? workspace.bonsplitController.allPaneIds.first else {
-            NSLog("ccx.dashboardOpen.failed reason=no_pane source=%@ projectId=%@ workspace=%@",
-                  debugSource, projectId ?? "<picker>", workspace.id.uuidString)
 #if DEBUG
             cmuxDebugLog("ccx.dashboardOpen.failed reason=no_pane source=\(debugSource) projectId=\(projectId ?? "<picker>") workspace=\(workspace.id.uuidString)")
 #endif
