@@ -16,6 +16,7 @@ final class CCXTaskSourceStore {
     private(set) var composerErrorMessage: String?
     private(set) var composerStatusMessage: String?
     private(set) var sourceChangeMessage: String?
+    private var pendingSourceChangeHash: String?
     var composerInput = ""
     var desiredTaskFormat = String(
         localized: "ccx.defaultTaskFormat",
@@ -77,7 +78,6 @@ final class CCXTaskSourceStore {
         isLoading = true
         errorMessage = nil
         conflictMessage = nil
-        defer { isLoading = false }
 
         do {
             let loaded = try await cli().readTaskSource(projectId: projectId)
@@ -85,6 +85,11 @@ final class CCXTaskSourceStore {
             sourceChangeMessage = nil
         } catch {
             errorMessage = Self.message(for: error)
+        }
+        isLoading = false
+        if let pendingSourceChangeHash {
+            self.pendingSourceChangeHash = nil
+            await handleTaskSourceChanged(newHash: pendingSourceChangeHash)
         }
     }
 
@@ -94,6 +99,10 @@ final class CCXTaskSourceStore {
     }
 
     func handleTaskSourceChanged(newHash: String?) async {
+        if isLoading {
+            pendingSourceChangeHash = newHash
+            return
+        }
         if let newHash, newHash == snapshot?.hash {
             sourceChangeMessage = nil
             return
@@ -113,6 +122,12 @@ final class CCXTaskSourceStore {
         draftContent = snapshot.content
         conflictMessage = nil
         errorMessage = nil
+        if sourceChangeMessage != nil {
+            sourceChangeMessage = String(
+                localized: "ccx.tasks.source.reloadAvailable",
+                defaultValue: "Task source changed on disk. Reload to show the latest content."
+            )
+        }
     }
 
     func clearComposerStatusMessage() {
