@@ -241,6 +241,7 @@ private struct CCXProjectRegistrationSheet: View {
         openPanelTask = nil
     }
 
+    @MainActor
     private func chooseRepositoryURL() async {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
@@ -253,6 +254,7 @@ private struct CCXProjectRegistrationSheet: View {
         }
     }
 
+    @MainActor
     private func chooseTaskSourceFileURL() async {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
