@@ -131,7 +131,7 @@ final class CCXProjectRegistrationViewModel {
         case .success(let resolvedCLI):
             cli = resolvedCLI
         case .failure(let error):
-            errorMessage = error.localizedDescription
+            errorMessage = Self.message(for: error)
             return nil
         }
 
@@ -147,6 +147,14 @@ final class CCXProjectRegistrationViewModel {
     }
 
     private static func message(for error: Error) -> String {
+        if case CCXControllerCLIError.notExecutable = error {
+            return String(localized: "ccx.projectRegistration.error.cliUnavailable",
+                          defaultValue: "CCX controller CLI is not available. Check the CCX installation, then try again.")
+        }
+        if case CCXControllerCLIError.launchFailed = error {
+            return String(localized: "ccx.projectRegistration.error.cliUnavailable",
+                          defaultValue: "CCX controller CLI is not available. Check the CCX installation, then try again.")
+        }
         if case CCXControllerCLIError.processFailed = error {
             return String(localized: "ccx.projectRegistration.error.registerFailed",
                           defaultValue: "Could not register the project. Check the selected repository and task source, then try again.")

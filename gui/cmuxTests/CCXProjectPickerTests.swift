@@ -251,6 +251,31 @@ final class CCXProjectPickerTests: XCTestCase {
         XCTAssertNil(viewModel.errorMessage)
     }
 
+    func testRegistrationViewModelShowsSafeMessageForCLIResolutionFailure() async throws {
+        let repo = try temporaryDirectory()
+        try FileManager.default.createDirectory(
+            at: repo.appendingPathComponent(".git", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        let taskSource = try makeFile(named: "tasks.md", in: repo)
+        let viewModel = CCXProjectRegistrationViewModel(
+            form: CCXProjectRegistrationFormState(
+                repositoryPath: repo.path,
+                taskSourceFilePath: taskSource.path
+            ),
+            cliProvider: { .failure(.notExecutable("/Users/alice/.ccx/bin/ccx")) }
+        )
+
+        let registered = await viewModel.submit()
+
+        XCTAssertNil(registered)
+        XCTAssertEqual(
+            viewModel.errorMessage,
+            "CCX controller CLI is not available. Check the CCX installation, then try again."
+        )
+        XCTAssertFalse(viewModel.errorMessage?.contains("/Users/alice") ?? true)
+    }
+
     func testRegistrationViewModelIgnoresDuplicateSubmitWhileRegistering() async throws {
         let repo = try temporaryDirectory()
         try FileManager.default.createDirectory(
