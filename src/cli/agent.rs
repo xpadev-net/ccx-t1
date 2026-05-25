@@ -58,7 +58,7 @@ fn start_orchestrator_with_adapters(
         .open(project_dir.join("orchestrator.lock"))?;
     let mut start_lock = RwLock::new(lock_file);
     let _guard = start_lock.write()?;
-    if let Some(existing) = active_orchestrator_session_id(&project_dir)? {
+    if let Some(existing) = active_orchestrator_session_id(&project_dir, tmux)? {
         print_start_orchestrator_reused_result(&args, &existing)?;
         return Ok(());
     }
@@ -136,7 +136,10 @@ fn print_start_orchestrator_reused_result(
     Ok(())
 }
 
-fn active_orchestrator_session_id(project_dir: &Utf8Path) -> Result<Option<String>, CcxError> {
+fn active_orchestrator_session_id(
+    project_dir: &Utf8Path,
+    tmux: &dyn TmuxAdapter,
+) -> Result<Option<String>, CcxError> {
     let events = read_events_from_dir(project_dir)?;
     let mut stopped = std::collections::HashSet::new();
     for event in events.iter().rev() {
@@ -149,7 +152,9 @@ fn active_orchestrator_session_id(project_dir: &Utf8Path) -> Result<Option<Strin
                     && payload.work_execution_id.is_none()
                     && !stopped.contains(&payload.agent_session_id) =>
             {
-                return Ok(Some(payload.agent_session_id.clone()));
+                if tmux.session_exists(&payload.agent_session_id)? {
+                    return Ok(Some(payload.agent_session_id.clone()));
+                }
             }
             _ => {}
         }
@@ -673,8 +678,20 @@ mod tests {
             Ok(())
         }
 
-        fn session_exists(&self, _session_id: &str) -> Result<bool, CcxError> {
-            Ok(false)
+        fn session_exists(&self, session_id: &str) -> Result<bool, CcxError> {
+            let was_created = self
+                .created
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|created| created == session_id);
+            let was_killed = self
+                .killed
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|killed| killed == session_id);
+            Ok(was_created && !was_killed)
         }
 
         fn get_pane_pid(&self, _session_id: &str) -> Result<Option<u32>, CcxError> {
@@ -869,6 +886,47 @@ mod tests {
             })
             .count();
         assert_eq!(created_events, 1);
+    }
+
+    #[test]
+    fn start_orchestrator_ignores_stale_event_when_tmux_session_is_absent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
+        seed_project(&home).unwrap();
+        let project_dir = home.join("projects").join("01JTEST00000000000000000001");
+        append_event_to_dir(
+            &project_dir,
+            &Event::new(
+                "01JTEST00000000000000000001",
+                Actor::Controller,
+                EventData::AgentSessionCreated(crate::domain::event::AgentSessionCreatedPayload {
+                    agent_session_id: "sess_stale".into(),
+                    work_execution_id: None,
+                    role: "orchestrator".into(),
+                    attach_mode: None,
+                    cmux_tab_id: "tab-stale".into(),
+                    tmux_session_id: "ccx-sess_stale".into(),
+                    cwd: "/repos/myproject".into(),
+                }),
+            ),
+        )
+        .unwrap();
+        let tmux = CaptureTmuxAdapter::new();
+
+        start_orchestrator_with_adapters(
+            StartOrchestratorArgs {
+                project_id: "01JTEST00000000000000000001".into(),
+                json: true,
+            },
+            &home,
+            "/usr/local/bin/ccx",
+            &tmux,
+            &HeadlessCmuxAdapter,
+        )
+        .unwrap();
+
+        assert_eq!(tmux.created.lock().unwrap().len(), 1);
+        assert_ne!(tmux.created.lock().unwrap()[0], "sess_stale");
     }
 
     #[test]
