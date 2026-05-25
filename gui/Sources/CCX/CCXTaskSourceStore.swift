@@ -93,7 +93,11 @@ final class CCXTaskSourceStore {
         await load()
     }
 
-    func handleTaskSourceChanged() async {
+    func handleTaskSourceChanged(newHash: String?) async {
+        if let newHash, newHash == snapshot?.hash {
+            sourceChangeMessage = nil
+            return
+        }
         if isDirty {
             sourceChangeMessage = String(
                 localized: "ccx.tasks.source.changedDirty",
@@ -137,6 +141,7 @@ final class CCXTaskSourceStore {
                 mtime: result.mtime,
                 warning: result.warning
             )
+            sourceChangeMessage = nil
         } catch {
             if Self.isConflict(error) {
                 conflictMessage = String(

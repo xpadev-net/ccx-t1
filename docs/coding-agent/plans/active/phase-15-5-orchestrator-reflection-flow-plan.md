@@ -21,13 +21,15 @@ Quality routing note:
   - `src/watcher/source_watcher.rs`
   - `gui/Sources/CCX/CCXControllerCLI.swift`
   - `gui/Sources/CCX/CCXModels.swift`
+  - `gui/Sources/CCX/CCXDashboardView.swift`
   - `gui/Sources/CCX/CCXProjectStore.swift`
   - `gui/Sources/CCX/CCXTaskSourceStore.swift`
   - `gui/Sources/CCX/CCXTasksView.swift`
   - `gui/Resources/Localizable.xcstrings`
   - `gui/cmuxTests/CCXControllerCLITests.swift`
-  - `gui/cmuxTests/CCXProjectStoreTests.swift`
+  - `gui/cmuxTests/CCXProjectsStoreTests.swift`
   - `gui/cmuxTests/CCXTaskSourceStoreTests.swift`
+  - `tests/e2e_fake_commands.rs`
   - `z/tasks.md`
   - `docs/coding-agent/plans/active/phase-15-5-orchestrator-reflection-flow-plan.md`
 - depends_on: []
@@ -42,7 +44,11 @@ Quality routing note:
   - required: true
     owner: orchestrator
     kind: static
-    detail: `rtk rustfmt --check src/cli/task_source.rs src/cli/mod.rs src/watcher/source_watcher.rs`, `rtk git diff --check`, `rtk jq empty gui/Resources/Localizable.xcstrings`, and `rtk bash gui/scripts/lint-pbxproj-test-wiring.sh --repo-root gui`.
+    detail: `rtk rustfmt --check src/cli/task_source.rs src/cli/mod.rs src/watcher/source_watcher.rs tests/e2e_fake_commands.rs`, `rtk git diff --check`, `rtk jq empty gui/Resources/Localizable.xcstrings`, and `rtk bash gui/scripts/lint-pbxproj-test-wiring.sh --repo-root gui`.
+  - required: true
+    owner: orchestrator
+    kind: static
+    detail: `rtk cargo clippy --bin ccx` completes with 0 errors; existing warnings are outside this task scope.
   - required: true
     owner: orchestrator
     kind: test
@@ -50,7 +56,11 @@ Quality routing note:
   - required: true
     owner: orchestrator
     kind: test
-    detail: Focused Xcode tests for `CCXControllerCLITests`, `CCXProjectStoreTests`, and `CCXTaskSourceStoreTests` pass.
+    detail: `rtk cargo test task_source --test e2e_fake_commands` passes for CLI-mediated reflection E2E coverage.
+  - required: true
+    owner: orchestrator
+    kind: test
+    detail: Focused Xcode tests for `CCXControllerCLITests`, `CCXProjectsStoreTests`, and `CCXTaskSourceStoreTests` pass.
   - required: true
     owner: reviewer
     kind: review

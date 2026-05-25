@@ -427,7 +427,7 @@ final class CCXTaskSourceStoreTests: XCTestCase {
         }
 
         await store.load()
-        await store.handleTaskSourceChanged()
+        await store.handleTaskSourceChanged(newHash: "hash-2")
 
         XCTAssertEqual(store.draftContent, "version-2")
         XCTAssertNil(store.sourceChangeMessage)
@@ -451,10 +451,75 @@ final class CCXTaskSourceStoreTests: XCTestCase {
 
         await store.load()
         store.draftContent = "local draft"
-        await store.handleTaskSourceChanged()
+        await store.handleTaskSourceChanged(newHash: "hash-2")
 
         XCTAssertEqual(store.draftContent, "local draft")
         XCTAssertNotNil(store.sourceChangeMessage)
+    }
+
+    func testSourceChangeIgnoresAlreadyLoadedHash() async {
+        var invocations = 0
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, _, _ in
+                invocations += 1
+                return .success(Self.result(stdout: """
+                {
+                  "project_id": "p_123",
+                  "path": "/repo/z/tasks.md",
+                  "content": "loaded",
+                  "hash": "hash-1",
+                  "mtime": "2026-05-26T00:00:00Z",
+                  "warning": null
+                }
+                """))
+            })
+        }
+
+        await store.load()
+        await store.handleTaskSourceChanged(newHash: "hash-1")
+
+        XCTAssertEqual(invocations, 1)
+        XCTAssertNil(store.sourceChangeMessage)
+    }
+
+    func testSaveClearsSourceChangeMessage() async {
+        var invocations = 0
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, arguments, _ in
+                invocations += 1
+                if arguments.contains("read") {
+                    return .success(Self.result(stdout: """
+                    {
+                      "project_id": "p_123",
+                      "path": "/repo/z/tasks.md",
+                      "content": "loaded",
+                      "hash": "hash-1",
+                      "mtime": "2026-05-26T00:00:00Z",
+                      "warning": null
+                    }
+                    """))
+                }
+                return .success(Self.result(stdout: """
+                {
+                  "project_id": "p_123",
+                  "path": "/repo/z/tasks.md",
+                  "hash": "hash-2",
+                  "mtime": "2026-05-26T00:00:01Z",
+                  "bytes_written": 5,
+                  "warning": null
+                }
+                """))
+            })
+        }
+
+        await store.load()
+        store.draftContent = "draft"
+        await store.handleTaskSourceChanged(newHash: "hash-remote")
+        XCTAssertNotNil(store.sourceChangeMessage)
+        await store.save()
+
+        XCTAssertEqual(invocations, 2)
+        XCTAssertNil(store.sourceChangeMessage)
     }
 
     func testDiscardRestoresLoadedContent() async {

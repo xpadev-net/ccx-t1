@@ -31,7 +31,11 @@ public struct CCXTasksView: View {
                         sourceChangeToken: Self.latestTaskSourceChangeToken(
                             recentEvents,
                             project: project
-                        )
+                        ),
+                        sourceChangeHash: Self.latestTaskSourceChange(
+                            recentEvents,
+                            project: project
+                        )?.newHash
                     )
                         .id(project.projectId)
                 } else {
@@ -55,12 +59,19 @@ public struct CCXTasksView: View {
         _ events: [CCXEventEntry],
         project: CCXProjectSummary
     ) -> String? {
+        latestTaskSourceChange(events, project: project).map { event in
+            "\(event.eventId):\(event.newHash ?? "")"
+        }
+    }
+
+    private static func latestTaskSourceChange(
+        _ events: [CCXEventEntry],
+        project: CCXProjectSummary
+    ) -> CCXEventEntry? {
         events.first { event in
             event.projectId == project.projectId
                 && event.kind == "task_source_file_changed"
                 && event.taskSourceFile == project.taskSourceFile
-        }.map { event in
-            "\(event.eventId):\(event.newHash ?? "")"
         }
     }
 }
@@ -70,6 +81,7 @@ private struct CCXTaskSourcePanel: View {
     let workExecutions: [CCXWorkExecution]
     let orchestratorSessionId: String?
     let sourceChangeToken: String?
+    let sourceChangeHash: String?
     @State private var status: CCXTaskSourceFileStatus
     @State private var sourceStore: CCXTaskSourceStore
 
@@ -77,12 +89,14 @@ private struct CCXTaskSourcePanel: View {
         project: CCXProjectSummary,
         workExecutions: [CCXWorkExecution],
         orchestratorSessionId: String?,
-        sourceChangeToken: String?
+        sourceChangeToken: String?,
+        sourceChangeHash: String?
     ) {
         self.project = project
         self.workExecutions = workExecutions
         self.orchestratorSessionId = orchestratorSessionId
         self.sourceChangeToken = sourceChangeToken
+        self.sourceChangeHash = sourceChangeHash
         self._status = State(initialValue: CCXTaskSourceFileStatus.checking(path: project.taskSourceFile))
         self._sourceStore = State(initialValue: CCXTaskSourceStore(projectId: project.projectId))
     }
@@ -274,7 +288,7 @@ private struct CCXTaskSourcePanel: View {
         .task(id: sourceChangeToken) {
             guard sourceChangeToken != nil, status.canOpen else { return }
             await refreshStatus(for: project.taskSourceFile)
-            await sourceStore.handleTaskSourceChanged()
+            await sourceStore.handleTaskSourceChanged(newHash: sourceChangeHash)
         }
     }
 
