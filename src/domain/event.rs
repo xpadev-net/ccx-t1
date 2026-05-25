@@ -29,6 +29,7 @@ pub enum Actor {
 #[serde(rename_all = "snake_case")]
 pub enum EventType {
     ProjectRegistered,
+    ProjectUnregistered,
     TaskSourceFileChanged,
     WorkExecutionCreated,
     WorkExecutionTaskFileCreated,
@@ -93,6 +94,7 @@ impl Event {
 #[serde(tag = "event_type", content = "payload", rename_all = "snake_case")]
 pub enum EventData {
     ProjectRegistered(ProjectRegisteredPayload),
+    ProjectUnregistered(ProjectUnregisteredPayload),
     TaskSourceFileChanged(TaskSourceFileChangedPayload),
     WorkExecutionCreated(WorkExecutionCreatedPayload),
     WorkExecutionTaskFileCreated(WorkExecutionTaskFileCreatedPayload),
@@ -130,6 +132,7 @@ impl EventData {
     pub fn event_type(&self) -> EventType {
         match self {
             Self::ProjectRegistered(_) => EventType::ProjectRegistered,
+            Self::ProjectUnregistered(_) => EventType::ProjectUnregistered,
             Self::TaskSourceFileChanged(_) => EventType::TaskSourceFileChanged,
             Self::WorkExecutionCreated(_) => EventType::WorkExecutionCreated,
             Self::WorkExecutionTaskFileCreated(_) => EventType::WorkExecutionTaskFileCreated,
@@ -174,6 +177,11 @@ pub struct ProjectRegisteredPayload {
     pub display_slug: String,
     pub canonical_repo: String,
     pub task_source_file: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectUnregisteredPayload {
+    pub purge_requested: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

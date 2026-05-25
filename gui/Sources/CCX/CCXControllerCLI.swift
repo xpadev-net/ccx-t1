@@ -106,6 +106,28 @@ nonisolated public struct CCXControllerCLI {
         }
     }
 
+    public func unregister(projectId: String, purge: Bool = false) async throws {
+        var arguments = [
+            "project",
+            "unregister",
+            "--project-id",
+            projectId,
+        ]
+        if purge {
+            arguments.append("--purge")
+        }
+        let result = try await runner(executableURL, arguments)
+        let stdout = string(from: result.stdout)
+        let stderr = string(from: result.stderr)
+        guard result.exitCode == 0 else {
+            throw CCXControllerCLIError.processFailed(
+                exitCode: result.exitCode,
+                stdout: stdout,
+                stderr: stderr
+            )
+        }
+    }
+
     private static func runProcess(
         executableURL: URL,
         arguments: [String],
