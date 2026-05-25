@@ -717,6 +717,84 @@ final class CCXTaskSourceStoreTests: XCTestCase {
         XCTAssertNil(store.workCreateStatusMessage)
     }
 
+    func testCreateWorkExecutionAttachFailureDoesNotRecreateOnRetry() async {
+        var calls: [[String]] = []
+        var attachAttempts = 0
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, arguments, _ in
+                calls.append(arguments)
+                if arguments.contains("read") {
+                    return .success(Self.result(stdout: """
+                    {
+                      "project_id": "p_123",
+                      "path": "/repo/z/tasks.md",
+                      "content": "- [ ] Build create flow\\n",
+                      "hash": "hash-1",
+                      "mtime": "2026-05-26T00:00:00Z",
+                      "warning": null
+                    }
+                    """))
+                }
+                if arguments.contains("create") {
+                    return .success(Self.result(stdout: """
+                    {
+                      "work_execution_id": "we_1",
+                      "branch_name": "ccx/we_1/build",
+                      "worktree_path": "/worktrees/we_1",
+                      "task_file_path": "/work-executions/we_1/task.md"
+                    }
+                    """))
+                }
+                if arguments.contains("attach") {
+                    attachAttempts += 1
+                    if attachAttempts == 1 {
+                        return .success(CCXControllerCLIProcessResult(
+                            exitCode: 1,
+                            stdout: Data(),
+                            stderr: Data("attach failed".utf8)
+                        ))
+                    }
+                    return .success(Self.result(stdout: """
+                    {
+                      "agent_session_id": "sess_worker",
+                      "work_execution_id": "we_1",
+                      "role": "worker",
+                      "mode": "writer",
+                      "status": "attached"
+                    }
+                    """))
+                }
+                return .success(Self.result(stdout: """
+                {
+                  "session_id": "sess_worker",
+                  "status": "sent"
+                }
+                """))
+            })
+        }
+
+        await store.load()
+        await store.createWorkExecutionFromSelection(project: Self.project)
+        XCTAssertEqual(store.lastCreatedWorkExecutionId, "we_1")
+        XCTAssertTrue(store.workCreateStatusMessage?.contains("we_1") ?? false)
+        XCTAssertNotNil(store.workCreateErrorMessage)
+
+        await store.createWorkExecutionFromSelection(project: Self.project)
+
+        XCTAssertEqual(
+            calls.map { Array($0.prefix(2)) },
+            [
+                ["task-source", "read"],
+                ["work", "create"],
+                ["agent", "attach"],
+                ["agent", "attach"],
+                ["agent", "prompt"],
+            ]
+        )
+        XCTAssertNotNil(store.workCreateStatusMessage)
+        XCTAssertNil(store.workCreateErrorMessage)
+    }
+
     private static func cli(
         _ handler: @escaping (
             URL,

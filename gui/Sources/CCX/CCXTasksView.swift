@@ -258,7 +258,7 @@ private struct CCXTaskSourcePanel: View {
                     Label(String(localized: "ccx.tasks.workCreate.submit", defaultValue: "Create and Attach Worker"),
                           systemImage: "hammer")
                 }
-                .disabled(!sourceStore.canCreateWorkExecution || sourceStore.isCreatingWork || !status.canOpen)
+                .disabled(!sourceStore.canCreateWorkExecution || !status.canOpen)
             }
 
             HStack(spacing: 8) {

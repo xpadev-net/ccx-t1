@@ -20,6 +20,10 @@ final class CCXTaskSourceStore {
     private(set) var workCreateStatusMessage: String?
     private(set) var isCreatingWork = false
     private var pendingSourceChangeHash: String?
+    private var pendingWorkCreateCandidateId: String?
+    private var pendingWorkCreateResult: CCXWorkCreateResult?
+    private var pendingWorkerSessionId: String?
+    private(set) var lastCreatedWorkExecutionId: String?
     var composerInput = ""
     var selectedWorkItemCandidateId: String?
     var desiredTaskFormat = String(
@@ -169,23 +173,57 @@ final class CCXTaskSourceStore {
 
         do {
             let cli = try cli()
-            let created = try await cli.createWork(
-                projectId: project.projectId,
-                sourcePath: project.taskSourceFile,
-                selectorType: candidate.selectorType,
-                selectorValue: candidate.selectorValue,
-                displayText: candidate.displayText
-            )
-            let attached = try await cli.attachAgent(
-                projectId: project.projectId,
-                workExecutionId: created.workExecutionId,
-                role: "worker",
-                mode: "writer"
-            )
-            _ = try await cli.promptAgent(
-                sessionId: attached.agentSessionId,
-                message: Self.workerPrompt(created: created, candidate: candidate)
-            )
+            let created: CCXWorkCreateResult
+            if pendingWorkCreateCandidateId == candidate.id, let pendingWorkCreateResult {
+                created = pendingWorkCreateResult
+            } else {
+                created = try await cli.createWork(
+                    projectId: project.projectId,
+                    sourcePath: project.taskSourceFile,
+                    selectorType: candidate.selectorType,
+                    selectorValue: candidate.selectorValue,
+                    displayText: candidate.displayText
+                )
+                pendingWorkCreateCandidateId = candidate.id
+                pendingWorkCreateResult = created
+                pendingWorkerSessionId = nil
+                lastCreatedWorkExecutionId = created.workExecutionId
+            }
+
+            let sessionId: String
+            if let pendingWorkerSessionId {
+                sessionId = pendingWorkerSessionId
+            } else {
+                do {
+                    let attached = try await cli.attachAgent(
+                        projectId: project.projectId,
+                        workExecutionId: created.workExecutionId,
+                        role: "worker",
+                        mode: "writer"
+                    )
+                    sessionId = attached.agentSessionId
+                    pendingWorkerSessionId = sessionId
+                } catch {
+                    workCreateStatusMessage = Self.workCreatePartialStatus(created: created)
+                    workCreateErrorMessage = Self.workCreateAttachMessage(for: error)
+                    return
+                }
+            }
+
+            do {
+                _ = try await cli.promptAgent(
+                    sessionId: sessionId,
+                    message: Self.workerPrompt(created: created, candidate: candidate)
+                )
+            } catch {
+                workCreateStatusMessage = Self.workCreatePartialStatus(created: created)
+                workCreateErrorMessage = Self.workCreatePromptMessage(for: error)
+                return
+            }
+
+            pendingWorkCreateCandidateId = nil
+            pendingWorkCreateResult = nil
+            pendingWorkerSessionId = nil
             workCreateStatusMessage = String(
                 localized: "ccx.tasks.workCreate.sent",
                 defaultValue: "Created WorkExecution and prompted a Worker."
@@ -421,6 +459,30 @@ final class CCXTaskSourceStore {
         }
         return String(localized: "ccx.tasks.workCreate.error.generic",
                       defaultValue: "Could not create the WorkExecution. Check the selected task and try again.")
+    }
+
+    private static func workCreatePartialStatus(created: CCXWorkCreateResult) -> String {
+        let prefix = String(
+            localized: "ccx.tasks.workCreate.partial.created",
+            defaultValue: "Created WorkExecution. Attach or prompt the Worker manually if retry does not recover:"
+        )
+        return "\(prefix) \(created.workExecutionId)"
+    }
+
+    private static func workCreateAttachMessage(for error: Error) -> String {
+        let prefix = String(
+            localized: "ccx.tasks.workCreate.error.attach",
+            defaultValue: "WorkExecution was created, but the Worker could not be attached."
+        )
+        return "\(prefix) \(Self.workCreateMessage(for: error))"
+    }
+
+    private static func workCreatePromptMessage(for error: Error) -> String {
+        let prefix = String(
+            localized: "ccx.tasks.workCreate.error.prompt",
+            defaultValue: "WorkExecution was created and a Worker was attached, but the prompt could not be sent."
+        )
+        return "\(prefix) \(Self.workCreateMessage(for: error))"
     }
 }
 
