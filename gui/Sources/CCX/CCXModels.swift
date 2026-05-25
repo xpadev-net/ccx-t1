@@ -4,7 +4,7 @@ import Foundation
 /// (see `src/persistence/sqlite.rs`). These are read-only snapshots used by the
 /// CCX dashboard UI; mutations belong to the controller.
 
-public struct CCXProjectSummary: Identifiable, Hashable, Sendable {
+public struct CCXProjectSummary: Identifiable, Hashable, Sendable, Decodable {
     public let projectId: String
     public let displaySlug: String
     public let canonicalRepo: String
@@ -12,6 +12,28 @@ public struct CCXProjectSummary: Identifiable, Hashable, Sendable {
     public let createdAt: String
 
     public var id: String { projectId }
+
+    private enum CodingKeys: String, CodingKey {
+        case projectId = "project_id"
+        case displaySlug = "display_slug"
+        case canonicalRepo = "canonical_repo"
+        case taskSourceFile = "task_source_file"
+        case createdAt = "created_at"
+    }
+
+    public init(
+        projectId: String,
+        displaySlug: String,
+        canonicalRepo: String,
+        taskSourceFile: String,
+        createdAt: String
+    ) {
+        self.projectId = projectId
+        self.displaySlug = displaySlug
+        self.canonicalRepo = canonicalRepo
+        self.taskSourceFile = taskSourceFile
+        self.createdAt = createdAt
+    }
 }
 
 public struct CCXWorkExecution: Identifiable, Hashable, Sendable {
