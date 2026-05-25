@@ -65,7 +65,8 @@ public struct CCXDashboardView: View {
                     CCXTasksView(
                         project: store.project,
                         workExecutions: store.workExecutions,
-                        agentSessions: store.agentSessions
+                        agentSessions: store.agentSessions,
+                        recentEvents: store.recentEvents
                     )
                 case .artifacts:
                     CCXArtifactsView(store: store)

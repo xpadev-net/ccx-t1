@@ -126,6 +126,30 @@ final class CCXProjectsStoreTests: XCTestCase {
         XCTAssertNotNil(snapshot.lastRefreshError)
     }
 
+    func testProjectSnapshotDecodesRustEventSchema() throws {
+        let home = tempDirectory()
+        let projectDir = home
+            .appendingPathComponent("projects", isDirectory: true)
+            .appendingPathComponent("p_1", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+        try Data("""
+        {"event_id":"e_1","project_id":"p_1","occurred_at":"2026-05-26T00:00:00Z","actor":"controller","event_type":"task_source_file_changed","payload":{"task_source_file":"/repo/z/tasks.md","new_hash":"hash-2"}}
+        """.utf8).write(to: projectDir.appendingPathComponent("events.jsonl"))
+
+        let snapshot = CCXProjectStore.Snapshot.load(paths: .init(
+            projectDir: projectDir,
+            sqlite: projectDir.appendingPathComponent("state.sqlite"),
+            events: projectDir.appendingPathComponent("events.jsonl"),
+            config: projectDir.appendingPathComponent("project.json")
+        ), projectId: "p_1")
+
+        XCTAssertEqual(snapshot.recentEvents.count, 1)
+        XCTAssertEqual(snapshot.recentEvents[0].kind, "task_source_file_changed")
+        XCTAssertEqual(snapshot.recentEvents[0].timestamp, "2026-05-26T00:00:00Z")
+        XCTAssertEqual(snapshot.recentEvents[0].taskSourceFile, "/repo/z/tasks.md")
+        XCTAssertEqual(snapshot.recentEvents[0].newHash, "hash-2")
+    }
+
     private func writeIndex(_ json: String, to home: URL) throws {
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         try Data(json.utf8).write(to: home.appendingPathComponent("projects.json"))

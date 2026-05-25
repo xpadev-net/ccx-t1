@@ -6,25 +6,31 @@ public struct CCXTasksView: View {
     let project: CCXProjectSummary?
     let workExecutions: [CCXWorkExecution]
     let agentSessions: [CCXAgentSession]
+    let recentEvents: [CCXEventEntry]
 
     public init(
         project: CCXProjectSummary?,
         workExecutions: [CCXWorkExecution] = [],
-        agentSessions: [CCXAgentSession] = []
+        agentSessions: [CCXAgentSession] = [],
+        recentEvents: [CCXEventEntry] = []
     ) {
         self.project = project
         self.workExecutions = workExecutions
         self.agentSessions = agentSessions
+        self.recentEvents = recentEvents
     }
 
     public var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 if let project {
+                    let latestChange = Self.latestTaskSourceChange(recentEvents, project: project)
                     CCXTaskSourcePanel(
                         project: project,
                         workExecutions: workExecutions,
-                        orchestratorSessionId: Self.activeOrchestratorSessionId(agentSessions)
+                        orchestratorSessionId: Self.activeOrchestratorSessionId(agentSessions),
+                        sourceChangeToken: latestChange.map { "\($0.eventId):\($0.newHash ?? "")" },
+                        sourceChangeHash: latestChange?.newHash
                     )
                         .id(project.projectId)
                 } else {
@@ -43,23 +49,40 @@ public struct CCXTasksView: View {
                 && ["starting", "running", "idle"].contains(session.state)
         }?.agentSessionId
     }
+
+    private static func latestTaskSourceChange(
+        _ events: [CCXEventEntry],
+        project: CCXProjectSummary
+    ) -> CCXEventEntry? {
+        events.first { event in
+            event.projectId == project.projectId
+                && event.kind == "task_source_file_changed"
+                && event.taskSourceFile == project.taskSourceFile
+        }
+    }
 }
 
 private struct CCXTaskSourcePanel: View {
     let project: CCXProjectSummary
     let workExecutions: [CCXWorkExecution]
     let orchestratorSessionId: String?
+    let sourceChangeToken: String?
+    let sourceChangeHash: String?
     @State private var status: CCXTaskSourceFileStatus
     @State private var sourceStore: CCXTaskSourceStore
 
     init(
         project: CCXProjectSummary,
         workExecutions: [CCXWorkExecution],
-        orchestratorSessionId: String?
+        orchestratorSessionId: String?,
+        sourceChangeToken: String?,
+        sourceChangeHash: String?
     ) {
         self.project = project
         self.workExecutions = workExecutions
         self.orchestratorSessionId = orchestratorSessionId
+        self.sourceChangeToken = sourceChangeToken
+        self.sourceChangeHash = sourceChangeHash
         self._status = State(initialValue: CCXTaskSourceFileStatus.checking(path: project.taskSourceFile))
         self._sourceStore = State(initialValue: CCXTaskSourceStore(projectId: project.projectId))
     }
@@ -97,6 +120,13 @@ private struct CCXTaskSourcePanel: View {
 
             if let warning = sourceStore.warningMessage {
                 Text(warning)
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+                    .textSelection(.enabled)
+            }
+
+            if let sourceChange = sourceStore.sourceChangeMessage {
+                Text(sourceChange)
                     .font(.callout)
                     .foregroundStyle(.orange)
                     .textSelection(.enabled)
@@ -240,6 +270,11 @@ private struct CCXTaskSourcePanel: View {
             if status.canOpen {
                 await sourceStore.load()
             }
+        }
+        .task(id: sourceChangeToken) {
+            guard sourceChangeToken != nil, status.canOpen else { return }
+            await refreshStatus(for: project.taskSourceFile)
+            await sourceStore.handleTaskSourceChanged(newHash: sourceChangeHash)
         }
     }
 

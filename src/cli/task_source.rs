@@ -10,8 +10,10 @@ use sha2::{Digest, Sha256};
 
 use crate::config::project_config::ProjectConfig;
 use crate::config::{load_project_config, project_dir};
+use crate::domain::event::{Actor, Event, EventData, TaskSourceFileChangedPayload};
 use crate::error::CcxError;
 use crate::git::repo::check_dirty;
+use crate::persistence::jsonl::append_event_to_dir;
 
 #[derive(Debug, Args)]
 pub struct ReadArgs {
@@ -123,6 +125,7 @@ pub fn write(args: WriteArgs) -> Result<(), CcxError> {
     let config = load_project_config(&args.project_id)?;
     let content = read_stdin()?;
     let loaded = replace_task_source_with_lock(&config, &args.expected_hash, &content)?;
+    record_task_source_changed_best_effort(&config, &loaded);
     let warning = dirty_warning(&config)?;
 
     if args.json {
@@ -154,6 +157,7 @@ pub fn append(args: AppendArgs) -> Result<(), CcxError> {
     let content = read_stdin()?;
     let (append_offset_bytes, loaded) =
         append_task_source_with_lock(&config, &args.expected_hash, &content)?;
+    record_task_source_changed_best_effort(&config, &loaded);
     let warning = dirty_warning(&config)?;
 
     if args.json {
@@ -194,6 +198,7 @@ fn load_task_source_with_read_lock(config: &ProjectConfig) -> Result<LoadedTaskS
     let lock_path = task_source_lock_path(config)?;
     let lock_file = OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(&lock_path)?;
@@ -236,6 +241,7 @@ fn with_task_source_lock<T>(
     let lock_path = task_source_lock_path(config)?;
     let lock_file = OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(&lock_path)?;
@@ -247,6 +253,32 @@ fn with_task_source_lock<T>(
 
 fn task_source_lock_path(config: &ProjectConfig) -> Result<Utf8PathBuf, CcxError> {
     Ok(project_dir(&config.project_id)?.join("task-source.lock"))
+}
+
+fn record_task_source_changed(
+    config: &ProjectConfig,
+    loaded: &LoadedTaskSource,
+) -> Result<(), CcxError> {
+    let event = Event::new(
+        &config.project_id,
+        Actor::Controller,
+        EventData::TaskSourceFileChanged(TaskSourceFileChangedPayload {
+            task_source_file: config.task_source_file.to_string(),
+            new_hash: loaded.hash.clone(),
+        }),
+    );
+    append_event_to_dir(&project_dir(&config.project_id)?, &event)
+}
+
+fn record_task_source_changed_best_effort(config: &ProjectConfig, loaded: &LoadedTaskSource) {
+    if let Err(e) = record_task_source_changed(config, loaded) {
+        tracing::warn!(
+            error = %e,
+            project_id = %config.project_id,
+            task_source_file = %config.task_source_file,
+            "task-source: failed to record task_source_file_changed event after file update"
+        );
+    }
 }
 
 fn ensure_loaded_hash(loaded: &LoadedTaskSource, expected_hash: &str) -> Result<(), CcxError> {
