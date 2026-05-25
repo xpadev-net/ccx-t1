@@ -9042,6 +9042,7 @@ final class Workspace: Identifiable, ObservableObject {
 
     /// Subscriptions for panel updates (e.g., browser title changes)
     var panelSubscriptions: [UUID: AnyCancellable] = [:]
+    private lazy var ccxProjectsStore = CCXProjectsStore()
 
     /// When true, suppresses auto-creation in didSplitPane (programmatic splits handle their own panels)
     private var isProgrammaticSplit = false
@@ -13203,7 +13204,7 @@ final class Workspace: Identifiable, ObservableObject {
         let previousFocusedPanelId = focusedPanelId
         let previousHostedView = focusedTerminalPanel?.hostedView
 
-        let panel = CCXDashboardPanel(projectId: projectId)
+        let panel = CCXDashboardPanel(projectId: projectId, projectsStore: ccxProjectsStore)
         panels[panel.id] = panel
         panelTitles[panel.id] = panel.displayTitle
 

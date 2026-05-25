@@ -44,6 +44,13 @@ final class CCXProjectPickerTests: XCTestCase {
         XCTAssertEqual(panel.displayTitle, "CCX")
     }
 
+    func testPanelUsesInjectedProjectsStore() {
+        let store = CCXProjectsStore(ccxHome: temporaryHome())
+        let panel = CCXDashboardPanel(projectId: nil, projectsStore: store)
+
+        XCTAssertTrue(panel.projectsStore === store)
+    }
+
     func testPickerRowModelUsesSummaryFields() {
         let summary = CCXProjectSummary(
             projectId: "p_1",

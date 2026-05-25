@@ -63,6 +63,7 @@
 - 2026-05-25: `gh-review-hook` requested preserving the launch intent guard and removing internal milestone copy. Added `CCXLaunchArguments.isCCXLaunch`, gated bridge presentation on CCX flags, covered parsing with tests, and changed placeholder text to user-facing copy.
 - 2026-05-25: Hook-fix validation passed: `rtk plutil -lint gui/cmux.xcodeproj/project.pbxproj`; `rtk bash gui/scripts/lint-pbxproj-test-wiring.sh --repo-root gui`; localization JSON parse; `git diff --check`. Targeted `xcodebuild` again compiled touched Swift files and stopped before test execution on the existing missing `gui/ghostty` checkout dependency.
 - 2026-05-25: `gh-review-hook` requested an empty `displaySlug` fallback in the project switch menu; updated the menu label to fall back to `projectId`. Reviewer subagent approved. `git diff --check` passed. Targeted `xcodebuild` compiled the touched Swift file and again stopped on the existing missing `gui/ghostty` checkout dependency.
+- 2026-05-25: `gh-review-hook` requested avoiding per-panel `CCXProjectsStore` watchers; added workspace-level shared store injection into `CCXDashboardPanel` with unit coverage. Reviewer subagent approved. `git diff --check` passed. Targeted `xcodebuild` compiled touched Swift/test files and again stopped on the existing missing `gui/ghostty` checkout dependency.
 
 ## Decision Log
 
