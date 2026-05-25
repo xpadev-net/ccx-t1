@@ -178,6 +178,29 @@ nonisolated public struct CCXControllerCLI {
         return try decodeJSONResult(result, as: CCXTaskSourceAppendResult.self)
     }
 
+    public func startOrchestrator(projectId: String) async throws -> CCXAgentStartResult {
+        let result = try await runner(executableURL, [
+            "agent",
+            "start-orchestrator",
+            "--project-id",
+            projectId,
+            "--json",
+        ], nil)
+        return try decodeJSONResult(result, as: CCXAgentStartResult.self)
+    }
+
+    public func promptAgent(sessionId: String, message: String) async throws -> CCXAgentPromptResult {
+        let result = try await runner(executableURL, [
+            "agent",
+            "prompt",
+            "--session-id",
+            sessionId,
+            "--stdin",
+            "--json",
+        ], Data(message.utf8))
+        return try decodeJSONResult(result, as: CCXAgentPromptResult.self)
+    }
+
     private func decodeJSONResult<T: Decodable>(
         _ result: CCXControllerCLIProcessResult,
         as type: T.Type
