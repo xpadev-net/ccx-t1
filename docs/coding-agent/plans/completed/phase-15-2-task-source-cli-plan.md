@@ -47,6 +47,7 @@ Repository rule suite status: `docs/coding-agent/rules/` is absent on `master`; 
 - 2026-05-26: Created plan after merging Phase 15.1 PR and checking out updated `master`.
 - 2026-05-26: Implemented `task-source read/write/append`, added compiled-binary E2E coverage, and validated with focused `cargo test task_source`. Repo-wide `cargo fmt --check` is blocked by pre-existing formatting drift, so targeted rustfmt is used for touched Rust files.
 - 2026-05-26: Reviewer found a delayed-stdin conflict race; changed write/append to read stdin before validating the expected hash and added delayed-stdin regression tests for both commands.
+- 2026-05-26: Re-review approved the implementation; marked the 15.2 checklist complete and moved this plan to completed.
 
 ## Decision Log
 
