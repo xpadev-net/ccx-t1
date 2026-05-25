@@ -123,7 +123,9 @@ pub fn unregister(args: UnregisterArgs) -> Result<(), CcxError> {
     let event = Event::new(
         &args.project_id,
         Actor::Controller,
-        EventData::ProjectUnregistered(ProjectUnregisteredPayload { purged: args.purge }),
+        EventData::ProjectUnregistered(ProjectUnregisteredPayload {
+            purge_requested: args.purge,
+        }),
     );
     append_event(&args.project_id, &event)?;
     remove_project_from_index(&home, &args.project_id)?;

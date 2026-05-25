@@ -181,7 +181,7 @@ pub struct ProjectRegisteredPayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectUnregisteredPayload {
-    pub purged: bool,
+    pub purge_requested: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

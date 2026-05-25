@@ -308,7 +308,7 @@ final class CCXProjectPickerTests: XCTestCase {
             "Could not unregister the project. Check the project list, then try again."
         )
         XCTAssertFalse(viewModel.errorMessage?.contains("private") ?? true)
-        XCTAssertEqual(viewModel.pendingProject, project)
+        XCTAssertNil(viewModel.pendingProject)
         XCTAssertFalse(viewModel.isSubmitting)
     }
 

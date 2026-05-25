@@ -220,6 +220,7 @@ final class CCXProjectUnregistrationViewModel {
 
     func claimPendingProjectForConfirmation() -> CCXProjectSummary? {
         guard !isSubmitting, let project = pendingProject else { return nil }
+        pendingProject = nil
         isSubmitting = true
         errorMessage = nil
         return project
