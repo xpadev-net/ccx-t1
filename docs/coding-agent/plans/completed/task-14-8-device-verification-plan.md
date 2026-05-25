@@ -15,6 +15,7 @@ Make the Phase 14 project-management GUI verification runnable from the local ch
 - type: impl
 - owns:
   - `gui/cmux.xcodeproj/project.pbxproj`
+  - `gui/Sources/CCX/CCXDashboardView.swift`
   - `gui/cmuxTests/CCXProjectPickerTests.swift`
   - `docs/coding-agent/plans/active/task-14-8-device-verification-plan.md`
 - depends_on: []
@@ -71,6 +72,10 @@ Make the Phase 14 project-management GUI verification runnable from the local ch
 - 2026-05-25: Started from `master` after P14.7 merge. Initial targeted `xcodebuild` was blocked by the app module being auto-derived as `ccx_cmux_DEV` while tests import `cmux_DEV`.
 - 2026-05-25: Added explicit app module names to preserve `cmux_DEV`/`cmux`; targeted `xcodebuild` then advanced to a pre-existing `XCTUnwrap` error in `CCXProjectPickerTests`.
 - 2026-05-25: Fixed the async test signature and made localized expectations locale-independent. Validation passed: `git diff --check`, `rtk plutil -lint gui/cmux.xcodeproj/project.pbxproj`, `rtk bash gui/scripts/lint-pbxproj-test-wiring.sh --repo-root gui`, and targeted `xcodebuild` for `cmuxTests/CCXProjectPickerTests` with `CMUX_SKIP_ZIG_BUILD=1` (35 tests, 0 failures).
+- 2026-05-25: Manual UI verification found project switching could leave the dashboard stuck on loading because the replacement `CCXProjectStore` did not get started when SwiftUI reused the same view position.
+- 2026-05-25: Fixed project switching by starting stores again when `store.projectId` changes. Validation passed: targeted `xcodebuild` for `cmuxTests/CCXProjectPickerTests` and `cmuxTests/WorkspaceCCXDashboardSwitchTests` with `CMUX_SKIP_ZIG_BUILD=1` (38 tests, 0 failures).
+- 2026-05-25: Completed UI verification against `/tmp/ccx-p14-8.Xc6Iay`: picker launch logged `projectId=<picker>`; `+ Add Project` registered repo-three and navigated to its dashboard; project switch navigated from repo-three to repo-two; unregister removed repo-three from `projects.json`; `ccx db verify --json` returned `consistent: true` for active repo-two and unregistered repo-three after rebuild.
+- 2026-05-25: Marked `z/tasks.md` 14.8 complete.
 
 ## Decision Log
 
