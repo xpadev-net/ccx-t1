@@ -525,20 +525,20 @@ final class CCXTaskSourceStore {
     }
 
     private static func workCreateAttachMessage(for error: Error) -> String {
-        let format = NSLocalizedString(
-            "ccx.tasks.workCreate.error.attach",
+        let format = String(
+            localized: "ccx.tasks.workCreate.error.attach",
+            defaultValue: "WorkExecution was created, but the Worker could not be attached. %@",
             bundle: .main,
-            value: "WorkExecution was created, but the Worker could not be attached. %@",
             comment: "WorkExecution created but Worker attach failed; placeholder is recovery guidance."
         )
         return String(format: format, locale: .current, Self.workCreateRecoveryMessage(for: error))
     }
 
     private static func workCreatePromptMessage(for error: Error) -> String {
-        let format = NSLocalizedString(
-            "ccx.tasks.workCreate.error.prompt",
+        let format = String(
+            localized: "ccx.tasks.workCreate.error.prompt",
+            defaultValue: "WorkExecution was created and a Worker was attached, but the prompt could not be sent. %@",
             bundle: .main,
-            value: "WorkExecution was created and a Worker was attached, but the prompt could not be sent. %@",
             comment: "WorkExecution created and Worker attached but prompt failed; placeholder is recovery guidance."
         )
         return String(format: format, locale: .current, Self.workCreateRecoveryMessage(for: error))
