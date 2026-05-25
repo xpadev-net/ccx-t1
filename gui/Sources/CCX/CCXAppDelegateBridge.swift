@@ -15,9 +15,10 @@ nonisolated private let ccxDashboardOpenLogger = Logger(
 /// CCXAppDelegateBridge.presentDashboardIfRequested(on: self)
 /// ```
 ///
-/// `ccx project open` invokes `open -a <bundle> --args --project-id <id>`,
-/// which leaves the id in `CommandLine.arguments`. `CCXLaunchArguments.parse()`
-/// extracts it; if a project id was supplied, we route through
+/// CCX launches pass either `--project-id <id>` for a direct dashboard or a
+/// picker request/default-project environment for project selection.
+/// `CCXLaunchArguments.parse()` extracts that policy; when a CCX launch was
+/// requested, we route through
 /// `openCCXDashboardInPreferredMainWindow`, which mirrors the existing
 /// `openFilePreviewInPreferredMainWindow` flow — pick an existing main-window
 /// context if there is one, otherwise create a fresh window and adopt the

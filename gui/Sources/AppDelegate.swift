@@ -1305,8 +1305,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
 #endif
 
-        // Open the CCX dashboard if `ccx project open <id>` invoked us with
-        // `--project-id <id>`. No-op when launched without that argument.
+        // Open CCX when launch arguments or CCX_DEFAULT_PROJECT_ID request a
+        // dashboard or project picker. No-op for ordinary cmux launches.
         CCXAppDelegateBridge.presentDashboardIfRequested(on: self)
     }
 

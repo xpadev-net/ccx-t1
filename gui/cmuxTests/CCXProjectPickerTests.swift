@@ -20,31 +20,71 @@ final class CCXProjectPickerTests: XCTestCase {
     }
 
     func testLaunchArgumentsDoNotRequestCCXForOrdinaryLaunch() {
-        let args = CCXLaunchArguments.parse(["cmux"])
+        let args = CCXLaunchArguments.parse(["cmux"], environment: [:])
 
         XCTAssertFalse(args.isCCXLaunch)
         XCTAssertNil(args.projectId)
     }
 
     func testLaunchArgumentsRequestPickerWithCCXFlag() {
-        let args = CCXLaunchArguments.parse(["cmux", "--ccx"])
+        let args = CCXLaunchArguments.parse(["cmux", "--ccx"], environment: [:])
 
         XCTAssertTrue(args.isCCXLaunch)
         XCTAssertNil(args.projectId)
     }
 
     func testLaunchArgumentsRequestPickerWithCCXProjectPickerFlag() {
-        let args = CCXLaunchArguments.parse(["cmux", "--ccx-project-picker"])
+        let args = CCXLaunchArguments.parse(["cmux", "--ccx-project-picker"], environment: [:])
 
         XCTAssertTrue(args.isCCXLaunch)
         XCTAssertNil(args.projectId)
     }
 
     func testLaunchArgumentsRequestDashboardWithProjectId() {
-        let args = CCXLaunchArguments.parse(["cmux", "--project-id", "p_1"])
+        let args = CCXLaunchArguments.parse(["cmux", "--project-id", "p_1"], environment: [:])
 
         XCTAssertTrue(args.isCCXLaunch)
         XCTAssertEqual(args.projectId, "p_1")
+    }
+
+    func testLaunchArgumentsUseDefaultProjectIdEnvironment() {
+        let args = CCXLaunchArguments.parse(
+            ["cmux"],
+            environment: ["CCX_DEFAULT_PROJECT_ID": " p_default "]
+        )
+
+        XCTAssertTrue(args.isCCXLaunch)
+        XCTAssertEqual(args.projectId, "p_default")
+    }
+
+    func testLaunchArgumentsPreferExplicitProjectIdOverDefaultEnvironment() {
+        let args = CCXLaunchArguments.parse(
+            ["cmux", "--project-id", "p_1"],
+            environment: ["CCX_DEFAULT_PROJECT_ID": "p_default"]
+        )
+
+        XCTAssertTrue(args.isCCXLaunch)
+        XCTAssertEqual(args.projectId, "p_1")
+    }
+
+    func testLaunchArgumentsPickerFlagIgnoresDefaultProjectIdEnvironment() {
+        let args = CCXLaunchArguments.parse(
+            ["cmux", "--ccx-project-picker"],
+            environment: ["CCX_DEFAULT_PROJECT_ID": "p_default"]
+        )
+
+        XCTAssertTrue(args.isCCXLaunch)
+        XCTAssertNil(args.projectId)
+    }
+
+    func testLaunchArgumentsIgnoreBlankDefaultProjectIdEnvironment() {
+        let args = CCXLaunchArguments.parse(
+            ["cmux"],
+            environment: ["CCX_DEFAULT_PROJECT_ID": "  "]
+        )
+
+        XCTAssertFalse(args.isCCXLaunch)
+        XCTAssertNil(args.projectId)
     }
 
     func testPanelWithoutProjectUsesPickerMode() {
