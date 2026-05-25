@@ -266,7 +266,15 @@ struct WorkspaceContentView: View {
                         )
                         workspace.focusPanel(panel.id)
                     },
-                    onTriggerFlash: { workspace.triggerDebugFlash(panelId: panel.id) }
+                    onTriggerFlash: { workspace.triggerDebugFlash(panelId: panel.id) },
+                    onOpenCCXProject: { project in
+                        _ = workspace.newCCXDashboardSurface(
+                            inPane: paneId,
+                            projectId: project.projectId,
+                            focus: true,
+                            origin: "ccx_project_picker"
+                        )
+                    }
                 )
                 .onTapGesture {
                     workspace.bonsplitController.focusPane(paneId)

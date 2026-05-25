@@ -19,6 +19,7 @@ struct PanelContentView: View {
     let onFocus: () -> Void
     let onRequestPanelFocus: () -> Void
     let onTriggerFlash: () -> Void
+    let onOpenCCXProject: (CCXProjectSummary) -> Void
 
     var body: some View {
         renderedPanel
@@ -91,7 +92,7 @@ struct PanelContentView: View {
             }
         case .ccxDashboard:
             if let ccxPanel = panel as? CCXDashboardPanel {
-                CCXDashboardPanelView(panel: ccxPanel)
+                CCXDashboardPanelView(panel: ccxPanel, onOpenProject: onOpenCCXProject)
             }
         }
     }

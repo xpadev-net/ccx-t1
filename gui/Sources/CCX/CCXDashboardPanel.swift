@@ -3,29 +3,34 @@ import Combine
 import SwiftUI
 
 /// Concrete `Panel` for the CCX dashboard. Mounts a `CCXDashboardView` driven
-/// by a `CCXProjectStore` for the project id passed in at launch time
-/// (`--project-id <id>`). Internal access matches the sibling concrete panel
-/// types in this target (RightSidebarToolPanel etc.).
+/// by a `CCXProjectStore` when a project id is available, or a project picker
+/// backed by `CCXProjectsStore` when launched without one.
 @MainActor
 final class CCXDashboardPanel: Panel, ObservableObject {
     let id: UUID
     let panelType: PanelType = .ccxDashboard
-    let store: CCXProjectStore
+    let projectStore: CCXProjectStore?
+    let projectsStore: CCXProjectsStore
 
     @Published private(set) var focusFlashToken: Int = 0
     @Published private(set) var titleOverride: String?
 
     private var storeChangeCancellable: AnyCancellable?
 
-    init(projectId: String, ccxHome: URL? = nil) {
+    init(projectId: String? = nil, ccxHome: URL? = nil, projectsStore: CCXProjectsStore) {
         self.id = UUID()
-        self.store = CCXProjectStore(projectId: projectId, ccxHome: ccxHome)
+        self.projectsStore = projectsStore
+        if let projectId, !projectId.isEmpty {
+            self.projectStore = CCXProjectStore(projectId: projectId, ccxHome: ccxHome)
+        } else {
+            self.projectStore = nil
+        }
         // `displayTitle` reads through to `store.project?.displaySlug`. Without
         // forwarding the store's change publisher, SwiftUI views observing
         // this panel never re-evaluate the title after the project config
         // loads asynchronously, so the tab gets stuck on the "CCX" fallback.
         let panelObjectWillChange = self.objectWillChange
-        self.storeChangeCancellable = store.objectWillChange.sink { _ in
+        self.storeChangeCancellable = projectStore?.objectWillChange.sink { _ in
             Task { @MainActor in
                 panelObjectWillChange.send()
             }
@@ -34,8 +39,11 @@ final class CCXDashboardPanel: Panel, ObservableObject {
 
     var displayTitle: String {
         if let titleOverride { return titleOverride }
-        if let slug = store.project?.displaySlug, !slug.isEmpty {
+        if let slug = projectStore?.project?.displaySlug, !slug.isEmpty {
             return slug
+        }
+        if projectStore == nil {
+            return String(localized: "ccx.projectPicker.title", defaultValue: "CCX Projects")
         }
         return String(localized: "ccx.panel.titleFallback", defaultValue: "CCX")
     }
@@ -65,12 +73,25 @@ final class CCXDashboardPanel: Panel, ObservableObject {
 /// SwiftUI host that renders a `CCXDashboardPanel` inside cmux's panel system.
 struct CCXDashboardPanelView: View {
     @ObservedObject var panel: CCXDashboardPanel
+    let onOpenProject: (CCXProjectSummary) -> Void
 
-    init(panel: CCXDashboardPanel) {
+    init(panel: CCXDashboardPanel, onOpenProject: @escaping (CCXProjectSummary) -> Void = { _ in }) {
         self.panel = panel
+        self.onOpenProject = onOpenProject
     }
 
     var body: some View {
-        CCXDashboardView(store: panel.store)
+        if let projectStore = panel.projectStore {
+            CCXDashboardView(
+                store: projectStore,
+                projectsStore: panel.projectsStore,
+                onOpenProject: onOpenProject
+            )
+        } else {
+            CCXProjectPickerView(
+                store: panel.projectsStore,
+                onOpenProject: onOpenProject
+            )
+        }
     }
 }

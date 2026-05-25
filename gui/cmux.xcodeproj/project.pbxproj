@@ -272,6 +272,8 @@
 		CCC00000000000000000B108 /* CCXControllerCLITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F108 /* CCXControllerCLITests.swift */; };
 		CCC00000000000000000B009 /* CCXProjectsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F009 /* CCXProjectsStore.swift */; };
 		CCC00000000000000000B109 /* CCXProjectsStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F109 /* CCXProjectsStoreTests.swift */; };
+		CCC00000000000000000B010 /* CCXProjectPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F010 /* CCXProjectPickerView.swift */; };
+		CCC00000000000000000B110 /* CCXProjectPickerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F110 /* CCXProjectPickerTests.swift */; };
 		A50012F3 /* KeyboardShortcutSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50012F2 /* KeyboardShortcutSettings.swift */; };
 		C0DE7B100000000000000001 /* TextBoxInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE7B100000000000000002 /* TextBoxInput.swift */; };
 		C1713004C1713004C1713004 /* KeyboardShortcutSettingsLookup.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1713003C1713003C1713003 /* KeyboardShortcutSettingsLookup.swift */; };
@@ -853,6 +855,8 @@
 		CCC00000000000000000F108 /* CCXControllerCLITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXControllerCLITests.swift; sourceTree = "<group>"; };
 		CCC00000000000000000F009 /* CCXProjectsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXProjectsStore.swift; sourceTree = "<group>"; };
 		CCC00000000000000000F109 /* CCXProjectsStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXProjectsStoreTests.swift; sourceTree = "<group>"; };
+		CCC00000000000000000F010 /* CCXProjectPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXProjectPickerView.swift; sourceTree = "<group>"; };
+		CCC00000000000000000F110 /* CCXProjectPickerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXProjectPickerTests.swift; sourceTree = "<group>"; };
 		A50012F2 /* KeyboardShortcutSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardShortcutSettings.swift; sourceTree = "<group>"; };
 		C0DE7B100000000000000002 /* TextBoxInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextBoxInput.swift; sourceTree = "<group>"; };
 		C1713003C1713003C1713003 /* KeyboardShortcutSettingsLookup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardShortcutSettingsLookup.swift; sourceTree = "<group>"; };
@@ -1186,6 +1190,7 @@
 				CCC00000000000000000F007 /* CCXAppDelegateBridge.swift */,
 				CCC00000000000000000F008 /* CCXControllerCLI.swift */,
 				CCC00000000000000000F009 /* CCXProjectsStore.swift */,
+				CCC00000000000000000F010 /* CCXProjectPickerView.swift */,
 			);
 			name = CCX;
 			path = CCX;
@@ -1718,6 +1723,7 @@
 					C0DE35530000000000000102 /* BundledCLILinkageTests.swift */,
 					CCC00000000000000000F108 /* CCXControllerCLITests.swift */,
 					CCC00000000000000000F109 /* CCXProjectsStoreTests.swift */,
+					CCC00000000000000000F110 /* CCXProjectPickerTests.swift */,
 					C37800000000000000000002 /* VMSSHCommandTests.swift */,
 					A5E01204A1B2C3D4E5F60718 /* OpenCodeHookRegressionTests.swift */,
 				10D684CFFB8CDEF89CE2D9E1 /* TabManagerSessionSnapshotTests.swift */,
@@ -2097,6 +2103,7 @@
 				CCC00000000000000000B007 /* CCXAppDelegateBridge.swift in Sources */,
 				CCC00000000000000000B008 /* CCXControllerCLI.swift in Sources */,
 				CCC00000000000000000B009 /* CCXProjectsStore.swift in Sources */,
+				CCC00000000000000000B010 /* CCXProjectPickerView.swift in Sources */,
 					A50012F3 /* KeyboardShortcutSettings.swift in Sources */,
 				C0DE7B100000000000000001 /* TextBoxInput.swift in Sources */,
 					C1713004C1713004C1713004 /* KeyboardShortcutSettingsLookup.swift in Sources */,
@@ -2525,6 +2532,7 @@
 					C0DE35530000000000000101 /* BundledCLILinkageTests.swift in Sources */,
 					CCC00000000000000000B108 /* CCXControllerCLITests.swift in Sources */,
 					CCC00000000000000000B109 /* CCXProjectsStoreTests.swift in Sources */,
+					CCC00000000000000000B110 /* CCXProjectPickerTests.swift in Sources */,
 					C37800000000000000000001 /* VMSSHCommandTests.swift in Sources */,
 					A5E01203A1B2C3D4E5F60718 /* OpenCodeHookRegressionTests.swift in Sources */,
 				2BB56A710BB1FC50367E5BCF /* TabManagerSessionSnapshotTests.swift in Sources */,
