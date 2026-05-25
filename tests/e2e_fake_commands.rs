@@ -1,7 +1,8 @@
+use std::io::Write;
 /// Level 3: E2E tests that exercise the compiled `ccx` binary with fake
 /// external commands (`gh`, `gh-review-hook`) injected via PATH.
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 /// Absolute path to the `tests/fixtures/bin/` directory.
 fn fixture_bin_dir() -> PathBuf {
@@ -31,6 +32,59 @@ fn run_ccx(args: &[&str], extra_env: &[(&str, &str)], ccx_home: &PathBuf) -> (i3
     (code, stdout, stderr)
 }
 
+fn run_ccx_with_stdin(
+    args: &[&str],
+    stdin: &str,
+    extra_env: &[(&str, &str)],
+    ccx_home: &PathBuf,
+) -> (i32, String, String) {
+    let bin = env!("CARGO_BIN_EXE_ccx");
+    let mut cmd = Command::new(bin);
+    cmd.args(args)
+        .env("PATH", path_with_fixtures())
+        .env("CCX_HOME", ccx_home)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (k, v) in extra_env {
+        cmd.env(k, v);
+    }
+    let mut child = cmd.spawn().expect("failed to spawn ccx");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(stdin.as_bytes())
+        .expect("failed to write stdin");
+    let out = child.wait_with_output().expect("failed to run ccx");
+    let code = out.status.code().unwrap_or(-1);
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    (code, stdout, stderr)
+}
+
+fn register_project(
+    home: &PathBuf,
+    repo: &std::path::Path,
+    task_source: &std::path::Path,
+) -> String {
+    let (code, stdout, stderr) = run_ccx(
+        &[
+            "project",
+            "register",
+            "--canonical-repo",
+            repo.to_str().unwrap(),
+            "--task-source-file",
+            task_source.to_str().unwrap(),
+        ],
+        &[],
+        home,
+    );
+    assert_eq!(code, 0, "register failed: {stderr}");
+    let project: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    project["project_id"].as_str().unwrap().to_string()
+}
+
 #[test]
 fn project_register_and_list_roundtrip() {
     let tmp = tempfile::tempdir().unwrap();
@@ -53,12 +107,160 @@ fn project_register_and_list_roundtrip() {
         &home,
     );
     assert_eq!(code, 0, "register should succeed");
-    assert!(stdout.contains("project_id"), "output should contain project_id");
+    assert!(
+        stdout.contains("project_id"),
+        "output should contain project_id"
+    );
 
     let (code, stdout, _) = run_ccx(&["project", "list", "--json"], &[], &home);
     assert_eq!(code, 0, "list should succeed");
     let projects: Vec<serde_json::Value> = serde_json::from_str(&stdout).unwrap();
     assert_eq!(projects.len(), 1, "one project should be listed");
+}
+
+#[test]
+fn task_source_read_write_append_roundtrip() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("ccx-home");
+    let repo = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let tasks = repo.join("tasks.md");
+    std::fs::write(&tasks, "one\n").unwrap();
+    let project_id = register_project(&home, &repo, &tasks);
+
+    let (code, stdout, stderr) = run_ccx(
+        &["task-source", "read", "--project-id", &project_id, "--json"],
+        &[],
+        &home,
+    );
+    assert_eq!(code, 0, "read failed: {stderr}");
+    let read_json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(read_json["path"].as_str().unwrap(), tasks.to_str().unwrap());
+    assert_eq!(read_json["content"].as_str().unwrap(), "one\n");
+    let hash = read_json["hash"].as_str().unwrap().to_string();
+
+    let (code, stdout, stderr) = run_ccx_with_stdin(
+        &[
+            "task-source",
+            "write",
+            "--project-id",
+            &project_id,
+            "--expected-hash",
+            &hash,
+            "--stdin",
+            "--json",
+        ],
+        "two\n",
+        &[],
+        &home,
+    );
+    assert_eq!(code, 0, "write failed: {stderr}");
+    assert_eq!(std::fs::read_to_string(&tasks).unwrap(), "two\n");
+    let write_json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(write_json["bytes_written"].as_u64(), Some(4));
+    let hash = write_json["hash"].as_str().unwrap().to_string();
+
+    let (code, stdout, stderr) = run_ccx_with_stdin(
+        &[
+            "task-source",
+            "append",
+            "--project-id",
+            &project_id,
+            "--expected-hash",
+            &hash,
+            "--stdin",
+            "--json",
+        ],
+        "three\n",
+        &[],
+        &home,
+    );
+    assert_eq!(code, 0, "append failed: {stderr}");
+    assert_eq!(std::fs::read_to_string(&tasks).unwrap(), "two\nthree\n");
+    let append_json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(append_json["append_offset"].as_u64(), Some(4));
+    assert_eq!(append_json["bytes_appended"].as_u64(), Some(6));
+}
+
+#[test]
+fn task_source_write_rejects_stale_expected_hash() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("ccx-home");
+    let repo = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let tasks = repo.join("tasks.md");
+    std::fs::write(&tasks, "one\n").unwrap();
+    let project_id = register_project(&home, &repo, &tasks);
+
+    let (code, _stdout, stderr) = run_ccx_with_stdin(
+        &[
+            "task-source",
+            "write",
+            "--project-id",
+            &project_id,
+            "--expected-hash",
+            "stale",
+            "--stdin",
+            "--json",
+        ],
+        "two\n",
+        &[],
+        &home,
+    );
+
+    assert_ne!(code, 0);
+    assert!(stderr.contains("task source conflict"));
+    assert_eq!(std::fs::read_to_string(&tasks).unwrap(), "one\n");
+}
+
+#[test]
+fn task_source_read_reports_missing_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("ccx-home");
+    let repo = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let tasks = repo.join("tasks.md");
+    std::fs::write(&tasks, "one\n").unwrap();
+    let project_id = register_project(&home, &repo, &tasks);
+    std::fs::remove_file(&tasks).unwrap();
+
+    let (code, _stdout, stderr) = run_ccx(
+        &["task-source", "read", "--project-id", &project_id, "--json"],
+        &[],
+        &home,
+    );
+
+    assert_ne!(code, 0);
+    assert!(stderr.contains("failed to read task source file"));
+}
+
+#[test]
+fn task_source_json_warns_when_canonical_repo_is_dirty() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("ccx-home");
+    let repo = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    Command::new("git")
+        .args(["init"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    let tasks = repo.join("tasks.md");
+    std::fs::write(&tasks, "one\n").unwrap();
+    let project_id = register_project(&home, &repo, &tasks);
+
+    let (code, stdout, stderr) = run_ccx(
+        &["task-source", "read", "--project-id", &project_id, "--json"],
+        &[],
+        &home,
+    );
+
+    assert_eq!(code, 0, "read failed: {stderr}");
+    let read_json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(
+        read_json["warning"]["code"].as_str(),
+        Some("task_source_in_canonical_repo_dirty")
+    );
 }
 
 #[test]
