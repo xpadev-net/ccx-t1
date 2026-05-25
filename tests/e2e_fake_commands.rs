@@ -1,6 +1,6 @@
-use std::io::Write;
 /// Level 3: E2E tests that exercise the compiled `ccx` binary with fake
 /// external commands (`gh`, `gh-review-hook`) injected via PATH.
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
@@ -61,6 +61,18 @@ fn run_ccx_with_stdin(
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
     (code, stdout, stderr)
+}
+
+fn spawn_ccx_with_piped_stdin(args: &[&str], ccx_home: &PathBuf) -> std::process::Child {
+    let bin = env!("CARGO_BIN_EXE_ccx");
+    let mut cmd = Command::new(bin);
+    cmd.args(args)
+        .env("PATH", path_with_fixtures())
+        .env("CCX_HOME", ccx_home)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    cmd.spawn().expect("failed to spawn ccx")
 }
 
 fn register_project(
@@ -211,6 +223,98 @@ fn task_source_write_rejects_stale_expected_hash() {
     assert_ne!(code, 0);
     assert!(stderr.contains("task source conflict"));
     assert_eq!(std::fs::read_to_string(&tasks).unwrap(), "one\n");
+}
+
+#[test]
+fn task_source_write_rechecks_hash_after_stdin() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("ccx-home");
+    let repo = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let tasks = repo.join("tasks.md");
+    std::fs::write(&tasks, "one\n").unwrap();
+    let project_id = register_project(&home, &repo, &tasks);
+    let (code, stdout, stderr) = run_ccx(
+        &["task-source", "read", "--project-id", &project_id, "--json"],
+        &[],
+        &home,
+    );
+    assert_eq!(code, 0, "read failed: {stderr}");
+    let read_json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let original_hash = read_json["hash"].as_str().unwrap().to_string();
+
+    let mut child = spawn_ccx_with_piped_stdin(
+        &[
+            "task-source",
+            "write",
+            "--project-id",
+            &project_id,
+            "--expected-hash",
+            &original_hash,
+            "--stdin",
+            "--json",
+        ],
+        &home,
+    );
+    std::fs::write(&tasks, "intervening\n").unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"two\n")
+        .expect("failed to write stdin");
+    let out = child.wait_with_output().expect("failed to run ccx");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+
+    assert!(!out.status.success());
+    assert!(stderr.contains("task source conflict"));
+    assert_eq!(std::fs::read_to_string(&tasks).unwrap(), "intervening\n");
+}
+
+#[test]
+fn task_source_append_rechecks_hash_after_stdin() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("ccx-home");
+    let repo = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let tasks = repo.join("tasks.md");
+    std::fs::write(&tasks, "one\n").unwrap();
+    let project_id = register_project(&home, &repo, &tasks);
+    let (code, stdout, stderr) = run_ccx(
+        &["task-source", "read", "--project-id", &project_id, "--json"],
+        &[],
+        &home,
+    );
+    assert_eq!(code, 0, "read failed: {stderr}");
+    let read_json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let original_hash = read_json["hash"].as_str().unwrap().to_string();
+
+    let mut child = spawn_ccx_with_piped_stdin(
+        &[
+            "task-source",
+            "append",
+            "--project-id",
+            &project_id,
+            "--expected-hash",
+            &original_hash,
+            "--stdin",
+            "--json",
+        ],
+        &home,
+    );
+    std::fs::write(&tasks, "intervening\n").unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"two\n")
+        .expect("failed to write stdin");
+    let out = child.wait_with_output().expect("failed to run ccx");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+
+    assert!(!out.status.success());
+    assert!(stderr.contains("task source conflict"));
+    assert_eq!(std::fs::read_to_string(&tasks).unwrap(), "intervening\n");
 }
 
 #[test]

@@ -119,8 +119,8 @@ pub fn write(args: WriteArgs) -> Result<(), CcxError> {
     }
 
     let config = load_project_config(&args.project_id)?;
-    ensure_expected_hash(&config, &args.expected_hash)?;
     let content = read_stdin()?;
+    ensure_expected_hash(&config, &args.expected_hash)?;
     std::fs::write(&config.task_source_file, content.as_bytes())?;
     let loaded = load_task_source(&config)?;
     let warning = dirty_warning(&config)?;
@@ -151,9 +151,9 @@ pub fn append(args: AppendArgs) -> Result<(), CcxError> {
     }
 
     let config = load_project_config(&args.project_id)?;
+    let content = read_stdin()?;
     let current = ensure_expected_hash(&config, &args.expected_hash)?;
     let append_offset = current.content.len();
-    let content = read_stdin()?;
     let mut next = current.content;
     next.push_str(&content);
     std::fs::write(&config.task_source_file, next.as_bytes())?;
