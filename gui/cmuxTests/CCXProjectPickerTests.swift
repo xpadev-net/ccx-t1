@@ -276,6 +276,33 @@ final class CCXProjectPickerTests: XCTestCase {
         XCTAssertFalse(viewModel.errorMessage?.contains("/Users/alice") ?? true)
     }
 
+    func testRegistrationViewModelShowsSafeMessageWhenCLICannotBeFound() async throws {
+        let repo = try temporaryDirectory()
+        try FileManager.default.createDirectory(
+            at: repo.appendingPathComponent(".git", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        let taskSource = try makeFile(named: "tasks.md", in: repo)
+        let viewModel = CCXProjectRegistrationViewModel(
+            form: CCXProjectRegistrationFormState(
+                repositoryPath: repo.path,
+                taskSourceFilePath: taskSource.path
+            ),
+            cliProvider: { .failure(.executableNotFound) }
+        )
+
+        let registered = await viewModel.submit()
+
+        XCTAssertNil(registered)
+        XCTAssertEqual(
+            viewModel.errorMessage,
+            "CCX controller CLI is not available. Check the CCX installation, then try again."
+        )
+        XCTAssertFalse(viewModel.errorMessage?.contains("CCX_CLI") ?? true)
+        XCTAssertFalse(viewModel.errorMessage?.contains("CCX_HOME") ?? true)
+        XCTAssertFalse(viewModel.errorMessage?.contains("PATH") ?? true)
+    }
+
     func testRegistrationViewModelIgnoresDuplicateSubmitWhileRegistering() async throws {
         let repo = try temporaryDirectory()
         try FileManager.default.createDirectory(
@@ -309,11 +336,17 @@ final class CCXProjectPickerTests: XCTestCase {
         )
 
         let firstSubmit = Task { await viewModel.submit() }
-        while continuation == nil {
+        for _ in 0..<100 where continuation == nil {
             await Task.yield()
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        guard let pendingRegistration = continuation else {
+            XCTFail("Timed out waiting for registration command to start.")
+            firstSubmit.cancel()
+            return
         }
         let duplicate = await viewModel.submit()
-        continuation?.resume(returning: CCXControllerCLIProcessResult(exitCode: 0, stdout: stdout, stderr: Data()))
+        pendingRegistration.resume(returning: CCXControllerCLIProcessResult(exitCode: 0, stdout: stdout, stderr: Data()))
         let registered = await firstSubmit.value
 
         XCTAssertNil(duplicate)

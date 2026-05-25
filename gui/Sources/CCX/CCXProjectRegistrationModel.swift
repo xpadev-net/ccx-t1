@@ -147,6 +147,10 @@ final class CCXProjectRegistrationViewModel {
     }
 
     private static func message(for error: Error) -> String {
+        if case CCXControllerCLIError.executableNotFound = error {
+            return String(localized: "ccx.projectRegistration.error.cliUnavailable",
+                          defaultValue: "CCX controller CLI is not available. Check the CCX installation, then try again.")
+        }
         if case CCXControllerCLIError.notExecutable = error {
             return String(localized: "ccx.projectRegistration.error.cliUnavailable",
                           defaultValue: "CCX controller CLI is not available. Check the CCX installation, then try again.")
