@@ -24,18 +24,13 @@ public struct CCXTasksView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 if let project {
+                    let latestChange = Self.latestTaskSourceChange(recentEvents, project: project)
                     CCXTaskSourcePanel(
                         project: project,
                         workExecutions: workExecutions,
                         orchestratorSessionId: Self.activeOrchestratorSessionId(agentSessions),
-                        sourceChangeToken: Self.latestTaskSourceChangeToken(
-                            recentEvents,
-                            project: project
-                        ),
-                        sourceChangeHash: Self.latestTaskSourceChange(
-                            recentEvents,
-                            project: project
-                        )?.newHash
+                        sourceChangeToken: latestChange.map { "\($0.eventId):\($0.newHash ?? "")" },
+                        sourceChangeHash: latestChange?.newHash
                     )
                         .id(project.projectId)
                 } else {
@@ -53,15 +48,6 @@ public struct CCXTasksView: View {
             session.role == "orchestrator"
                 && ["starting", "running", "idle"].contains(session.state)
         }?.agentSessionId
-    }
-
-    private static func latestTaskSourceChangeToken(
-        _ events: [CCXEventEntry],
-        project: CCXProjectSummary
-    ) -> String? {
-        latestTaskSourceChange(events, project: project).map { event in
-            "\(event.eventId):\(event.newHash ?? "")"
-        }
     }
 
     private static func latestTaskSourceChange(

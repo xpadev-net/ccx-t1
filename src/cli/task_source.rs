@@ -125,7 +125,7 @@ pub fn write(args: WriteArgs) -> Result<(), CcxError> {
     let config = load_project_config(&args.project_id)?;
     let content = read_stdin()?;
     let loaded = replace_task_source_with_lock(&config, &args.expected_hash, &content)?;
-    record_task_source_changed(&config, &loaded)?;
+    record_task_source_changed_best_effort(&config, &loaded);
     let warning = dirty_warning(&config)?;
 
     if args.json {
@@ -157,7 +157,7 @@ pub fn append(args: AppendArgs) -> Result<(), CcxError> {
     let content = read_stdin()?;
     let (append_offset_bytes, loaded) =
         append_task_source_with_lock(&config, &args.expected_hash, &content)?;
-    record_task_source_changed(&config, &loaded)?;
+    record_task_source_changed_best_effort(&config, &loaded);
     let warning = dirty_warning(&config)?;
 
     if args.json {
@@ -268,6 +268,17 @@ fn record_task_source_changed(
         }),
     );
     append_event_to_dir(&project_dir(&config.project_id)?, &event)
+}
+
+fn record_task_source_changed_best_effort(config: &ProjectConfig, loaded: &LoadedTaskSource) {
+    if let Err(e) = record_task_source_changed(config, loaded) {
+        tracing::warn!(
+            error = %e,
+            project_id = %config.project_id,
+            task_source_file = %config.task_source_file,
+            "task-source: failed to record task_source_file_changed event after file update"
+        );
+    }
 }
 
 fn ensure_loaded_hash(loaded: &LoadedTaskSource, expected_hash: &str) -> Result<(), CcxError> {
