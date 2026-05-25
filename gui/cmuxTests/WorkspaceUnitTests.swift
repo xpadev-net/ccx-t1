@@ -2430,6 +2430,46 @@ final class WorkspaceCCXDashboardSwitchTests: XCTestCase {
         XCTAssertEqual(workspace.surfaceIdFromPanelId(switchedPanel.id), originalTabId)
         XCTAssertEqual(workspace.panelIdFromSurfaceId(originalTabId), originalPanel.id)
     }
+
+    func testOpenCCXProjectCreatesDedicatedWorkspaceWithManagementTab() throws {
+        let manager = TabManager()
+        let initialWorkspace = try XCTUnwrap(manager.selectedWorkspace)
+        let initialWorkspaceCount = manager.tabs.count
+        let project = CCXProjectSummary(
+            projectId: "p_123",
+            displaySlug: "repo-one",
+            canonicalRepo: "/tmp/repo-one",
+            taskSourceFile: "/tmp/repo-one/z/tasks.md",
+            createdAt: "2026-05-25T00:00:00Z"
+        )
+
+        let projectWorkspace = try XCTUnwrap(manager.openCCXProjectWorkspace(project: project, origin: "test"))
+
+        XCTAssertNotEqual(projectWorkspace.id, initialWorkspace.id)
+        XCTAssertEqual(manager.tabs.count, initialWorkspaceCount + 1)
+        XCTAssertEqual(manager.selectedWorkspace?.id, projectWorkspace.id)
+        XCTAssertEqual(projectWorkspace.customTitle, "repo-one")
+        XCTAssertEqual(projectWorkspace.panels.values.compactMap { $0 as? CCXDashboardPanel }.count, 1)
+        XCTAssertEqual(projectWorkspace.panels.count, 2)
+        let dashboardPanel = try XCTUnwrap(projectWorkspace.panels.values.compactMap { $0 as? CCXDashboardPanel }.first)
+        XCTAssertEqual(dashboardPanel.projectStore?.projectId, "p_123")
+        XCTAssertEqual(projectWorkspace.focusedPanelId, dashboardPanel.id)
+    }
+
+    func testOpenCCXProjectReusesExistingProjectWorkspace() throws {
+        let manager = TabManager()
+        let initialWorkspace = try XCTUnwrap(manager.selectedWorkspace)
+        let firstWorkspace = try XCTUnwrap(manager.openCCXProjectWorkspace(projectId: "p_reuse", origin: "test"))
+        let workspaceCount = manager.tabs.count
+        manager.selectWorkspace(initialWorkspace)
+
+        let secondWorkspace = try XCTUnwrap(manager.openCCXProjectWorkspace(projectId: " p_reuse ", origin: "test"))
+
+        XCTAssertTrue(firstWorkspace === secondWorkspace)
+        XCTAssertEqual(manager.tabs.count, workspaceCount)
+        XCTAssertEqual(manager.selectedWorkspace?.id, firstWorkspace.id)
+        XCTAssertEqual(firstWorkspace.panels.values.compactMap { $0 as? CCXDashboardPanel }.count, 1)
+    }
 }
 
 final class WorkspacePlacementSettingsTests: XCTestCase {
