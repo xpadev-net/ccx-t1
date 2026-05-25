@@ -118,7 +118,9 @@ private struct CCXProjectSwitchMenu: View {
 
     var body: some View {
         Menu {
-            if projectsStore.projects.isEmpty {
+            if let error = projectsStore.lastRefreshError {
+                Text(error)
+            } else if projectsStore.projects.isEmpty {
                 Text(String(localized: "ccx.projectPicker.empty", defaultValue: "No CCX projects registered."))
             } else {
                 ForEach(projectsStore.projects) { project in
