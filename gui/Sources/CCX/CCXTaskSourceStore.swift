@@ -17,7 +17,6 @@ final class CCXTaskSourceStore {
     private(set) var composerStatusMessage: String?
     var composerInput = ""
     var desiredTaskFormat = "- [ ] <actionable task title>\n  - context: <why this matters>\n  - acceptance: <how to verify it>"
-    private var cachedOrchestratorSessionId: String?
 
     @ObservationIgnored
     private let projectId: String
@@ -96,6 +95,10 @@ final class CCXTaskSourceStore {
         errorMessage = nil
     }
 
+    func clearComposerStatusMessage() {
+        composerStatusMessage = nil
+    }
+
     func save() async {
         guard canSave, let expectedHash = snapshot?.hash else { return }
         isSaving = true
@@ -146,12 +149,8 @@ final class CCXTaskSourceStore {
             let sessionId: String
             if let orchestratorSessionId, !orchestratorSessionId.isEmpty {
                 sessionId = orchestratorSessionId
-                cachedOrchestratorSessionId = nil
-            } else if let cachedOrchestratorSessionId {
-                sessionId = cachedOrchestratorSessionId
             } else {
                 sessionId = try await cli.startOrchestrator(projectId: project.projectId).agentSessionId
-                cachedOrchestratorSessionId = sessionId
             }
             let prompt = Self.orchestratorPrompt(
                 request: request,
@@ -166,7 +165,6 @@ final class CCXTaskSourceStore {
                 defaultValue: "Sent to Orchestrator."
             )
         } catch {
-            cachedOrchestratorSessionId = nil
             composerErrorMessage = Self.composerMessage(for: error)
         }
     }

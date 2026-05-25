@@ -275,7 +275,7 @@ final class CCXTaskSourceStoreTests: XCTestCase {
         XCTAssertNil(store.composerErrorMessage)
     }
 
-    func testComposerCachesStartedOrchestratorForImmediateSubsequentSubmit() async {
+    func testComposerStartsThroughCLIWhenNoLiveSessionIsAvailable() async {
         var calls: [[String]] = []
         let store = CCXTaskSourceStore(projectId: "p_123") {
             .success(Self.cli { _, arguments, _ in
@@ -314,7 +314,7 @@ final class CCXTaskSourceStoreTests: XCTestCase {
 
         XCTAssertEqual(
             calls.filter { $0.contains("start-orchestrator") }.count,
-            1
+            2
         )
         XCTAssertEqual(
             calls.filter { $0.contains("prompt") && $0.contains("sess_started") }.count,
@@ -322,7 +322,7 @@ final class CCXTaskSourceStoreTests: XCTestCase {
         )
     }
 
-    func testComposerClearsStaleCacheAndUsesLiveSessionAfterPromptFailure() async {
+    func testComposerUsesLiveSessionAfterPromptFailure() async {
         var calls: [[String]] = []
         let store = CCXTaskSourceStore(projectId: "p_123") {
             .success(Self.cli { _, arguments, _ in

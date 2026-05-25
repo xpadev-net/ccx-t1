@@ -152,6 +152,11 @@ private struct CCXTaskSourcePanel: View {
                             .stroke(.separator.opacity(0.7))
                     )
                     .disabled(sourceStore.isComposing || !status.canOpen)
+                    .onChange(of: sourceStore.composerInput) { _, newValue in
+                        if !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            sourceStore.clearComposerStatusMessage()
+                        }
+                    }
                 if let status = sourceStore.composerStatusMessage {
                     Text(status)
                         .font(.callout)
