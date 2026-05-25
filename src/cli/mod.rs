@@ -15,6 +15,8 @@ use clap::Subcommand;
 pub enum ProjectCommand {
     /// Register a new project
     Register(project::RegisterArgs),
+    /// Unregister a project
+    Unregister(project::UnregisterArgs),
     /// List registered projects
     List(project::ListArgs),
     /// Open a project (launch ccx-cmux workspace)
@@ -26,6 +28,7 @@ pub enum ProjectCommand {
 pub fn run_project(cmd: ProjectCommand) -> Result<(), crate::error::CcxError> {
     match cmd {
         ProjectCommand::Register(args) => project::register(args),
+        ProjectCommand::Unregister(args) => project::unregister(args),
         ProjectCommand::List(args) => project::list(args),
         ProjectCommand::Open(args) => project::open(args),
         ProjectCommand::Status(args) => project::status(args),

@@ -104,6 +104,8 @@ fn apply_event_data(tx: &rusqlite::Transaction<'_>, event: &Event) -> Result<(),
             )?;
         }
 
+        EventData::ProjectUnregistered(_) => {}
+
         EventData::TaskSourceFileChanged(p) => {
             let n = tx.execute(
                 "UPDATE projects SET task_source_file = ?1 WHERE project_id = ?2",

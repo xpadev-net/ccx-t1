@@ -4,7 +4,9 @@ use std::process::Command;
 
 use crate::config::project_config::{CleanupPolicy, GhReviewHook, ProjectConfig};
 use crate::config::{ccx_home, project_dir};
-use crate::domain::event::{Actor, Event, EventData, ProjectRegisteredPayload, generate_id};
+use crate::domain::event::{
+    generate_id, Actor, Event, EventData, ProjectRegisteredPayload, ProjectUnregisteredPayload,
+};
 use crate::error::CcxError;
 use crate::persistence::jsonl::append_event;
 use camino::Utf8PathBuf;
@@ -13,9 +15,7 @@ use fd_lock::RwLock;
 
 /// Derive a display slug from a path: strip leading '/', replace '/' with '-'.
 fn path_to_slug(path: &Utf8PathBuf) -> String {
-    path.as_str()
-        .trim_start_matches('/')
-        .replace('/', "-")
+    path.as_str().trim_start_matches('/').replace('/', "-")
 }
 
 #[derive(Debug, Args)]
@@ -24,6 +24,14 @@ pub struct RegisterArgs {
     pub canonical_repo: Utf8PathBuf,
     #[arg(long)]
     pub task_source_file: Utf8PathBuf,
+}
+
+#[derive(Debug, Args)]
+pub struct UnregisterArgs {
+    #[arg(long)]
+    pub project_id: String,
+    #[arg(long)]
+    pub purge: bool,
 }
 
 pub fn register(args: RegisterArgs) -> Result<(), CcxError> {
@@ -98,6 +106,60 @@ fn update_projects_index(home: &Utf8PathBuf, config: &ProjectConfig) -> Result<(
         "display_slug": config.display_slug,
         "canonical_repo": config.canonical_repo,
     }));
+    fs::write(&index_path, serde_json::to_string_pretty(&index)?)?;
+    Ok(())
+}
+
+pub fn unregister(args: UnregisterArgs) -> Result<(), CcxError> {
+    let home = ccx_home()?;
+    let dir = project_dir(&args.project_id)?;
+    let config_path = dir.join("project.json");
+    if !config_path.exists() {
+        return Err(CcxError::ProjectNotFound {
+            project_id: args.project_id,
+        });
+    }
+
+    let event = Event::new(
+        &args.project_id,
+        Actor::Controller,
+        EventData::ProjectUnregistered(ProjectUnregisteredPayload { purged: args.purge }),
+    );
+    append_event(&args.project_id, &event)?;
+    remove_project_from_index(&home, &args.project_id)?;
+
+    if args.purge {
+        fs::remove_dir_all(&dir)?;
+    }
+
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&serde_json::json!({
+            "project_id": args.project_id,
+            "purged": args.purge,
+        }))?
+    );
+    Ok(())
+}
+
+fn remove_project_from_index(home: &Utf8PathBuf, project_id: &str) -> Result<(), CcxError> {
+    let lock_path = home.join("projects.lock");
+    let index_path = home.join("projects.json");
+
+    let lock_file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(&lock_path)?;
+    let mut rw_lock = RwLock::new(lock_file);
+    let _guard = rw_lock.write()?;
+
+    let mut index: Vec<serde_json::Value> = match fs::read_to_string(&index_path) {
+        Ok(raw) => serde_json::from_str(&raw)?,
+        Err(e) if e.kind() == ErrorKind::NotFound => vec![],
+        Err(e) => return Err(e.into()),
+    };
+    index.retain(|entry| entry["project_id"].as_str() != Some(project_id));
     fs::write(&index_path, serde_json::to_string_pretty(&index)?)?;
     Ok(())
 }
@@ -214,7 +276,6 @@ pub fn open(args: OpenArgs) -> Result<(), CcxError> {
     Ok(())
 }
 
-
 pub fn status(args: StatusArgs) -> Result<(), CcxError> {
     let dir = project_dir(&args.project_id)?;
     let config_path = dir.join("project.json");
@@ -319,5 +380,75 @@ mod tests {
         );
 
         unsafe { std::env::remove_var("CCX_HOME") };
+    }
+
+    #[test]
+    fn test_unregister_removes_project_from_index_and_appends_event() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        unsafe { std::env::set_var("CCX_HOME", tmp.path().to_str().unwrap()) };
+
+        let repo = Utf8PathBuf::from(tmp.path().join("repo").to_str().unwrap());
+        let tasks = repo.join("z/tasks.md");
+        fs::create_dir_all(&repo).unwrap();
+        register(RegisterArgs {
+            canonical_repo: repo,
+            task_source_file: tasks,
+        })
+        .unwrap();
+        let project_id = registered_project_id(tmp.path());
+
+        unregister(UnregisterArgs {
+            project_id: project_id.clone(),
+            purge: false,
+        })
+        .unwrap();
+
+        let raw = fs::read_to_string(tmp.path().join("projects.json")).unwrap();
+        let index: Vec<serde_json::Value> = serde_json::from_str(&raw).unwrap();
+        assert!(index.is_empty());
+        let project_dir = tmp.path().join(format!("projects/{project_id}"));
+        assert!(project_dir.join("project.json").exists());
+        let events_raw = fs::read_to_string(project_dir.join("events.jsonl")).unwrap();
+        assert!(events_raw.contains("project_registered"));
+        assert!(events_raw.contains("project_unregistered"));
+
+        unsafe { std::env::remove_var("CCX_HOME") };
+    }
+
+    #[test]
+    fn test_unregister_purge_removes_project_directory() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        unsafe { std::env::set_var("CCX_HOME", tmp.path().to_str().unwrap()) };
+
+        let repo = Utf8PathBuf::from(tmp.path().join("repo").to_str().unwrap());
+        let tasks = repo.join("z/tasks.md");
+        fs::create_dir_all(&repo).unwrap();
+        register(RegisterArgs {
+            canonical_repo: repo,
+            task_source_file: tasks,
+        })
+        .unwrap();
+        let project_id = registered_project_id(tmp.path());
+
+        unregister(UnregisterArgs {
+            project_id: project_id.clone(),
+            purge: true,
+        })
+        .unwrap();
+
+        let raw = fs::read_to_string(tmp.path().join("projects.json")).unwrap();
+        let index: Vec<serde_json::Value> = serde_json::from_str(&raw).unwrap();
+        assert!(index.is_empty());
+        assert!(!tmp.path().join(format!("projects/{project_id}")).exists());
+
+        unsafe { std::env::remove_var("CCX_HOME") };
+    }
+
+    fn registered_project_id(home: &std::path::Path) -> String {
+        let raw = fs::read_to_string(home.join("projects.json")).unwrap();
+        let index: Vec<serde_json::Value> = serde_json::from_str(&raw).unwrap();
+        index[0]["project_id"].as_str().unwrap().to_string()
     }
 }

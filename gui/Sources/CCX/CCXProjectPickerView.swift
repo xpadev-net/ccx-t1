@@ -22,6 +22,7 @@ public struct CCXProjectPickerView: View {
     let onOpenProject: (CCXProjectSummary) -> Void
     @State private var isAddProjectPresented = false
     @State private var registrationViewModel = CCXProjectRegistrationViewModel()
+    @State private var unregistrationViewModel = CCXProjectUnregistrationViewModel()
 
     public init(
         store: CCXProjectsStore,
@@ -43,6 +44,17 @@ public struct CCXProjectPickerView: View {
                         projectRow(CCXProjectPickerRowModel(summary: project))
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            unregistrationViewModel.request(project)
+                        } label: {
+                            Label(
+                                String(localized: "ccx.projectPicker.unregister", defaultValue: "Unregister project"),
+                                systemImage: "trash"
+                            )
+                        }
+                        .disabled(unregistrationViewModel.isSubmitting)
+                    }
                 }
                 if !store.projects.isEmpty {
                     addProjectButton
@@ -55,6 +67,36 @@ public struct CCXProjectPickerView: View {
             }
         }
         .onAppear { store.start() }
+        .confirmationDialog(
+            String(localized: "ccx.projectUnregister.title", defaultValue: "Unregister project?"),
+            isPresented: Binding(
+                get: { unregistrationViewModel.pendingProject != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        unregistrationViewModel.cancel()
+                    }
+                }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button(
+                String(localized: "ccx.projectPicker.unregister", defaultValue: "Unregister project"),
+                role: .destructive
+            ) {
+                if let project = unregistrationViewModel.claimPendingProjectForConfirmation() {
+                    Task {
+                        if await unregistrationViewModel.finishConfirmation(for: project) {
+                            store.refresh()
+                        }
+                    }
+                }
+            }
+            Button(String(localized: "ccx.common.cancel", defaultValue: "Cancel"), role: .cancel) {
+                unregistrationViewModel.cancel()
+            }
+        } message: {
+            Text(String(localized: "ccx.projectUnregister.message", defaultValue: "This removes the project from the CCX project list. Project data is kept on disk."))
+        }
         .sheet(isPresented: $isAddProjectPresented) {
             CCXProjectRegistrationSheet(
                 viewModel: registrationViewModel,
@@ -77,6 +119,11 @@ public struct CCXProjectPickerView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             if let error = store.lastRefreshError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+            if let error = unregistrationViewModel.errorMessage {
                 Text(error)
                     .font(.caption)
                     .foregroundStyle(.orange)
@@ -137,6 +184,80 @@ public struct CCXProjectPickerView: View {
                 .frame(width: 180)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+@MainActor
+@Observable
+final class CCXProjectUnregistrationViewModel {
+    var pendingProject: CCXProjectSummary?
+    private(set) var isSubmitting = false
+    private(set) var errorMessage: String?
+
+    private let cliProvider: () -> Result<CCXControllerCLI, CCXControllerCLIError>
+
+    init(cliProvider: @escaping () -> Result<CCXControllerCLI, CCXControllerCLIError> = {
+        CCXControllerCLI.make()
+    }) {
+        self.cliProvider = cliProvider
+    }
+
+    func request(_ project: CCXProjectSummary) {
+        guard !isSubmitting else { return }
+        errorMessage = nil
+        pendingProject = project
+    }
+
+    func cancel() {
+        guard !isSubmitting else { return }
+        pendingProject = nil
+    }
+
+    func confirm(purge: Bool = false) async -> Bool {
+        guard let project = claimPendingProjectForConfirmation() else { return false }
+        return await finishConfirmation(for: project, purge: purge)
+    }
+
+    func claimPendingProjectForConfirmation() -> CCXProjectSummary? {
+        guard !isSubmitting, let project = pendingProject else { return nil }
+        isSubmitting = true
+        errorMessage = nil
+        return project
+    }
+
+    func finishConfirmation(for project: CCXProjectSummary, purge: Bool = false) async -> Bool {
+        defer { isSubmitting = false }
+        do {
+            let cli = try cliProvider().get()
+            try await cli.unregister(projectId: project.projectId, purge: purge)
+            pendingProject = nil
+            return true
+        } catch let error as CCXControllerCLIError {
+            errorMessage = Self.safeErrorMessage(for: error)
+            return false
+        } catch {
+            errorMessage = Self.genericErrorMessage()
+            return false
+        }
+    }
+
+    private static func safeErrorMessage(for error: CCXControllerCLIError) -> String {
+        switch error {
+        case .executableNotFound, .notExecutable:
+            return String(
+                localized: "ccx.projectUnregister.error.cliUnavailable",
+                defaultValue: "CCX controller CLI is not available. Check the CCX installation, then try again."
+            )
+        default:
+            return genericErrorMessage()
+        }
+    }
+
+    private static func genericErrorMessage() -> String {
+        String(
+            localized: "ccx.projectUnregister.error.generic",
+            defaultValue: "Could not unregister the project. Check the project list, then try again."
+        )
     }
 }
 

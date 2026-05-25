@@ -217,6 +217,131 @@ final class CCXProjectPickerTests: XCTestCase {
         XCTAssertNil(viewModel.errorMessage)
     }
 
+    func testControllerCLIUnregisterUsesProjectIdArgument() async throws {
+        var capturedArguments: [String] = []
+        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, arguments in
+            capturedArguments = arguments
+            return CCXControllerCLIProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+
+        try await cli.unregister(projectId: "p_remove")
+
+        XCTAssertEqual(capturedArguments, [
+            "project",
+            "unregister",
+            "--project-id",
+            "p_remove",
+        ])
+    }
+
+    func testControllerCLIUnregisterAddsPurgeFlag() async throws {
+        var capturedArguments: [String] = []
+        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, arguments in
+            capturedArguments = arguments
+            return CCXControllerCLIProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+
+        try await cli.unregister(projectId: "p_remove", purge: true)
+
+        XCTAssertEqual(capturedArguments, [
+            "project",
+            "unregister",
+            "--project-id",
+            "p_remove",
+            "--purge",
+        ])
+    }
+
+    func testUnregistrationViewModelClearsPendingProjectOnSuccess() async {
+        let project = CCXProjectSummary(
+            projectId: "p_remove",
+            displaySlug: "repo",
+            canonicalRepo: "/repo",
+            taskSourceFile: "/repo/z/tasks.md",
+            createdAt: "2026-05-25T00:00:00Z"
+        )
+        var capturedArguments: [String] = []
+        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, arguments in
+            capturedArguments = arguments
+            return CCXControllerCLIProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        let viewModel = CCXProjectUnregistrationViewModel(cliProvider: { .success(cli) })
+
+        viewModel.request(project)
+        let didUnregister = await viewModel.confirm()
+
+        XCTAssertTrue(didUnregister)
+        XCTAssertNil(viewModel.pendingProject)
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertFalse(viewModel.isSubmitting)
+        XCTAssertEqual(capturedArguments, [
+            "project",
+            "unregister",
+            "--project-id",
+            "p_remove",
+        ])
+    }
+
+    func testUnregistrationViewModelShowsSafeMessageOnCLIFailure() async {
+        let project = CCXProjectSummary(
+            projectId: "p_remove",
+            displaySlug: "repo",
+            canonicalRepo: "/repo",
+            taskSourceFile: "/repo/z/tasks.md",
+            createdAt: "2026-05-25T00:00:00Z"
+        )
+        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, _ in
+            CCXControllerCLIProcessResult(
+                exitCode: 2,
+                stdout: Data("private output".utf8),
+                stderr: Data("private path".utf8)
+            )
+        }
+        let viewModel = CCXProjectUnregistrationViewModel(cliProvider: { .success(cli) })
+
+        viewModel.request(project)
+        let didUnregister = await viewModel.confirm()
+
+        XCTAssertFalse(didUnregister)
+        XCTAssertEqual(
+            viewModel.errorMessage,
+            "Could not unregister the project. Check the project list, then try again."
+        )
+        XCTAssertFalse(viewModel.errorMessage?.contains("private") ?? true)
+        XCTAssertEqual(viewModel.pendingProject, project)
+        XCTAssertFalse(viewModel.isSubmitting)
+    }
+
+    func testUnregistrationViewModelClaimPreventsDialogDismissFromCancellingPendingProject() async {
+        let project = CCXProjectSummary(
+            projectId: "p_remove",
+            displaySlug: "repo",
+            canonicalRepo: "/repo",
+            taskSourceFile: "/repo/z/tasks.md",
+            createdAt: "2026-05-25T00:00:00Z"
+        )
+        var capturedArguments: [String] = []
+        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, arguments in
+            capturedArguments = arguments
+            return CCXControllerCLIProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        let viewModel = CCXProjectUnregistrationViewModel(cliProvider: { .success(cli) })
+
+        viewModel.request(project)
+        let claimed = viewModel.claimPendingProjectForConfirmation()
+        viewModel.cancel()
+        let didUnregister = await viewModel.finishConfirmation(for: try XCTUnwrap(claimed))
+
+        XCTAssertTrue(didUnregister)
+        XCTAssertNil(viewModel.pendingProject)
+        XCTAssertEqual(capturedArguments, [
+            "project",
+            "unregister",
+            "--project-id",
+            "p_remove",
+        ])
+    }
+
     func testRegistrationViewModelShowsSafeMessageOnCLIFailure() async throws {
         let repo = try temporaryDirectory()
         try FileManager.default.createDirectory(
