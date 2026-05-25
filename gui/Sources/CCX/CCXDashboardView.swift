@@ -65,9 +65,16 @@ public struct CCXDashboardView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .onAppear {
-            store.start()
-            projectsStore?.start()
+            startDashboardStores()
         }
+        .onChange(of: ObjectIdentifier(store)) { _, _ in
+            store.start()
+        }
+    }
+
+    private func startDashboardStores() {
+        store.start()
+        projectsStore?.start()
     }
 
     private var header: some View {
