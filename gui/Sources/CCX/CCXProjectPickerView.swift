@@ -259,7 +259,10 @@ private struct CCXProjectRegistrationSheet: View {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .text]
-        panel.directoryURL = URL(fileURLWithPath: viewModel.form.trimmedRepositoryPath, isDirectory: true)
+        let repositoryPath = viewModel.form.trimmedRepositoryPath
+        if !repositoryPath.isEmpty {
+            panel.directoryURL = URL(fileURLWithPath: repositoryPath, isDirectory: true)
+        }
         panel.prompt = String(localized: "ccx.projectRegistration.choose", defaultValue: "Choose")
         if await runOpenPanel(panel) == .OK, let url = panel.url {
             viewModel.form.taskSourceFilePath = url.path

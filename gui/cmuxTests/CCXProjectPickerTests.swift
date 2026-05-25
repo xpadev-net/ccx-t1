@@ -389,6 +389,34 @@ final class CCXProjectPickerTests: XCTestCase {
         }
     }
 
+    func testRegistrationViewModelShowsSafeMessageForUnexpectedErrors() async throws {
+        let repo = try temporaryDirectory()
+        try FileManager.default.createDirectory(
+            at: repo.appendingPathComponent(".git", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        let taskSource = try makeFile(named: "tasks.md", in: repo)
+        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, _ in
+            throw NSError(domain: "private.internal.registration", code: 7)
+        }
+        let viewModel = CCXProjectRegistrationViewModel(
+            form: CCXProjectRegistrationFormState(
+                repositoryPath: repo.path,
+                taskSourceFilePath: taskSource.path
+            ),
+            cliProvider: { .success(cli) }
+        )
+
+        let registered = await viewModel.submit()
+
+        XCTAssertNil(registered)
+        XCTAssertEqual(
+            viewModel.errorMessage,
+            "Could not register the project. Check the selected repository and task source, then try again."
+        )
+        XCTAssertFalse(viewModel.errorMessage?.contains("private.internal.registration") ?? true)
+    }
+
     func testRegistrationViewModelIgnoresDuplicateSubmitWhileRegistering() async throws {
         let repo = try temporaryDirectory()
         try FileManager.default.createDirectory(

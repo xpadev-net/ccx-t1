@@ -173,6 +173,7 @@ final class CCXProjectRegistrationViewModel {
                               defaultValue: "Could not register the project. Check the selected repository and task source, then try again.")
             }
         }
-        return error.localizedDescription
+        return String(localized: "ccx.projectRegistration.error.registerFailed",
+                      defaultValue: "Could not register the project. Check the selected repository and task source, then try again.")
     }
 }
