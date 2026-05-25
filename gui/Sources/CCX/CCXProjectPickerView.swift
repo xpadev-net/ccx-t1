@@ -144,6 +144,7 @@ private struct CCXProjectRegistrationSheet: View {
     @Bindable var viewModel: CCXProjectRegistrationViewModel
     let onCancel: () -> Void
     let onRegistered: (CCXProjectSummary) -> Void
+    @State private var openPanelTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -174,6 +175,7 @@ private struct CCXProjectRegistrationSheet: View {
             HStack {
                 Spacer()
                 Button(String(localized: "ccx.common.cancel", defaultValue: "Cancel")) {
+                    cancelOpenPanelTask()
                     onCancel()
                 }
                 .disabled(viewModel.isSubmitting)
@@ -199,6 +201,9 @@ private struct CCXProjectRegistrationSheet: View {
         .onAppear {
             viewModel.clearSubmitError()
         }
+        .onDisappear {
+            cancelOpenPanelTask()
+        }
     }
 
     private func pathField(title: String, text: Binding<String>, action: @escaping () -> Void) -> some View {
@@ -218,15 +223,22 @@ private struct CCXProjectRegistrationSheet: View {
     }
 
     private func chooseRepository() {
-        Task {
+        cancelOpenPanelTask()
+        openPanelTask = Task { @MainActor in
             await chooseRepositoryURL()
         }
     }
 
     private func chooseTaskSourceFile() {
-        Task {
+        cancelOpenPanelTask()
+        openPanelTask = Task { @MainActor in
             await chooseTaskSourceFileURL()
         }
+    }
+
+    private func cancelOpenPanelTask() {
+        openPanelTask?.cancel()
+        openPanelTask = nil
     }
 
     private func chooseRepositoryURL() async {
@@ -254,10 +266,51 @@ private struct CCXProjectRegistrationSheet: View {
     }
 
     private func runOpenPanel(_ panel: NSOpenPanel) async -> NSApplication.ModalResponse {
-        await withCheckedContinuation { continuation in
-            panel.begin { response in
-                continuation.resume(returning: response)
+        await CCXOpenPanelContinuation(panel: panel).run()
+    }
+}
+
+@MainActor
+private final class CCXOpenPanelContinuation {
+    private let panel: NSOpenPanel
+    private var continuation: CheckedContinuation<NSApplication.ModalResponse, Never>?
+    private var didResume = false
+
+    init(panel: NSOpenPanel) {
+        self.panel = panel
+    }
+
+    func run() async -> NSApplication.ModalResponse {
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if didResume {
+                    continuation.resume(returning: .cancel)
+                    return
+                }
+                self.continuation = continuation
+                panel.begin { response in
+                    Task { @MainActor in
+                        self.resume(response)
+                    }
+                }
+            }
+        } onCancel: {
+            Task { @MainActor in
+                self.cancel()
             }
         }
+    }
+
+    private func cancel() {
+        panel.cancel(nil)
+        resume(.cancel)
+    }
+
+    private func resume(_ response: NSApplication.ModalResponse) {
+        guard !didResume else { return }
+        didResume = true
+        let continuation = continuation
+        self.continuation = nil
+        continuation?.resume(returning: response)
     }
 }

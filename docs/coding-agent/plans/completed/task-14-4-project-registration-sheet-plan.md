@@ -58,6 +58,8 @@
 - 2026-05-25: Hook-fix validation passed: `git diff --check`; JSON parse for `gui/Resources/Localizable.xcstrings`. Targeted `xcodebuild` compiled touched Swift/test files and ran `xcstringstool` dry-run, then stopped before test execution on the existing missing `gui/ghostty` checkout dependency.
 - 2026-05-25: `gh-review-hook` requested clearing stale submit errors on sheet re-open and splitting registration model types out of the picker view file. Added `CCXProjectRegistrationModel.swift`, wired it into the Xcode project, and added clear-error test coverage.
 - 2026-05-25: Second hook-fix validation passed: `git diff --check`; JSON parse for `gui/Resources/Localizable.xcstrings`; `rtk plutil -lint gui/cmux.xcodeproj/project.pbxproj`; `rtk bash gui/scripts/lint-pbxproj-test-wiring.sh --repo-root gui`. Targeted `xcodebuild` compiled touched Swift/test files and again stopped before test execution on the existing missing `gui/ghostty` checkout dependency.
+- 2026-05-25: `gh-review-hook` requested tying file-picker tasks to the sheet lifecycle. Stored the open-panel task, cancelled it on Cancel/disappear, and wrapped `NSOpenPanel.begin` in a cancellation-aware continuation that cancels the panel and resumes with `.cancel`.
+- 2026-05-25: Third hook-fix validation passed: `git diff --check`; JSON parse for `gui/Resources/Localizable.xcstrings`; `rtk plutil -lint gui/cmux.xcodeproj/project.pbxproj`; `rtk bash gui/scripts/lint-pbxproj-test-wiring.sh --repo-root gui`. Targeted `xcodebuild` compiled touched Swift/test files and again stopped before test execution on the existing missing `gui/ghostty` checkout dependency.
 
 ## Decision Log
 
