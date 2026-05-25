@@ -225,6 +225,32 @@ final class CCXProjectPickerTests: XCTestCase {
         XCTAssertFalse(viewModel.isSubmitting)
     }
 
+    func testRegistrationViewModelClearsSubmitErrorForSheetReopen() async throws {
+        let repo = try temporaryDirectory()
+        try FileManager.default.createDirectory(
+            at: repo.appendingPathComponent(".git", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        let taskSource = try makeFile(named: "tasks.md", in: repo)
+        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, _ in
+            CCXControllerCLIProcessResult(exitCode: 2, stdout: Data(), stderr: Data("private path".utf8))
+        }
+        let viewModel = CCXProjectRegistrationViewModel(
+            form: CCXProjectRegistrationFormState(
+                repositoryPath: repo.path,
+                taskSourceFilePath: taskSource.path
+            ),
+            cliProvider: { .success(cli) }
+        )
+
+        _ = await viewModel.submit()
+        XCTAssertNotNil(viewModel.errorMessage)
+
+        viewModel.clearSubmitError()
+
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
     func testRegistrationViewModelIgnoresDuplicateSubmitWhileRegistering() async throws {
         let repo = try temporaryDirectory()
         try FileManager.default.createDirectory(

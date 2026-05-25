@@ -273,6 +273,7 @@
 		CCC00000000000000000B009 /* CCXProjectsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F009 /* CCXProjectsStore.swift */; };
 		CCC00000000000000000B109 /* CCXProjectsStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F109 /* CCXProjectsStoreTests.swift */; };
 		CCC00000000000000000B010 /* CCXProjectPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F010 /* CCXProjectPickerView.swift */; };
+		CCC00000000000000000B011 /* CCXProjectRegistrationModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F011 /* CCXProjectRegistrationModel.swift */; };
 		CCC00000000000000000B110 /* CCXProjectPickerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F110 /* CCXProjectPickerTests.swift */; };
 		A50012F3 /* KeyboardShortcutSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50012F2 /* KeyboardShortcutSettings.swift */; };
 		C0DE7B100000000000000001 /* TextBoxInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE7B100000000000000002 /* TextBoxInput.swift */; };
@@ -856,6 +857,7 @@
 		CCC00000000000000000F009 /* CCXProjectsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXProjectsStore.swift; sourceTree = "<group>"; };
 		CCC00000000000000000F109 /* CCXProjectsStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXProjectsStoreTests.swift; sourceTree = "<group>"; };
 		CCC00000000000000000F010 /* CCXProjectPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXProjectPickerView.swift; sourceTree = "<group>"; };
+		CCC00000000000000000F011 /* CCXProjectRegistrationModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXProjectRegistrationModel.swift; sourceTree = "<group>"; };
 		CCC00000000000000000F110 /* CCXProjectPickerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXProjectPickerTests.swift; sourceTree = "<group>"; };
 		A50012F2 /* KeyboardShortcutSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardShortcutSettings.swift; sourceTree = "<group>"; };
 		C0DE7B100000000000000002 /* TextBoxInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextBoxInput.swift; sourceTree = "<group>"; };
@@ -1191,6 +1193,7 @@
 				CCC00000000000000000F008 /* CCXControllerCLI.swift */,
 				CCC00000000000000000F009 /* CCXProjectsStore.swift */,
 				CCC00000000000000000F010 /* CCXProjectPickerView.swift */,
+				CCC00000000000000000F011 /* CCXProjectRegistrationModel.swift */,
 			);
 			name = CCX;
 			path = CCX;
@@ -2104,6 +2107,7 @@
 				CCC00000000000000000B008 /* CCXControllerCLI.swift in Sources */,
 				CCC00000000000000000B009 /* CCXProjectsStore.swift in Sources */,
 				CCC00000000000000000B010 /* CCXProjectPickerView.swift in Sources */,
+				CCC00000000000000000B011 /* CCXProjectRegistrationModel.swift in Sources */,
 					A50012F3 /* KeyboardShortcutSettings.swift in Sources */,
 				C0DE7B100000000000000001 /* TextBoxInput.swift in Sources */,
 					C1713004C1713004C1713004 /* KeyboardShortcutSettingsLookup.swift in Sources */,
