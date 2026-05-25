@@ -204,6 +204,7 @@ final class CCXTaskSourceStoreTests: XCTestCase {
         XCTAssertTrue(prompt.contains("- [ ] title"))
         XCTAssertTrue(prompt.contains("Add export support"))
         XCTAssertTrue(prompt.contains("Inspect the repository code"))
+        XCTAssertTrue(prompt.contains("ccx task-source append"))
         XCTAssertTrue(prompt.contains("Preserve the GUI original request"))
     }
 
@@ -405,6 +406,55 @@ final class CCXTaskSourceStoreTests: XCTestCase {
                 defaultValue: "Could not send the request to Orchestrator. Check the agent session, then try again."
             )
         )
+    }
+
+    func testSourceChangeAutoReloadsCleanDraft() async {
+        var invocations = 0
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, _, _ in
+                invocations += 1
+                return .success(Self.result(stdout: """
+                {
+                  "project_id": "p_123",
+                  "path": "/repo/z/tasks.md",
+                  "content": "version-\(invocations)",
+                  "hash": "hash-\(invocations)",
+                  "mtime": "2026-05-26T00:00:00Z",
+                  "warning": null
+                }
+                """))
+            })
+        }
+
+        await store.load()
+        await store.handleTaskSourceChanged()
+
+        XCTAssertEqual(store.draftContent, "version-2")
+        XCTAssertNil(store.sourceChangeMessage)
+    }
+
+    func testSourceChangePreservesDirtyDraftAndShowsReloadMessage() async {
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, _, _ in
+                .success(Self.result(stdout: """
+                {
+                  "project_id": "p_123",
+                  "path": "/repo/z/tasks.md",
+                  "content": "loaded",
+                  "hash": "hash-1",
+                  "mtime": "2026-05-26T00:00:00Z",
+                  "warning": null
+                }
+                """))
+            })
+        }
+
+        await store.load()
+        store.draftContent = "local draft"
+        await store.handleTaskSourceChanged()
+
+        XCTAssertEqual(store.draftContent, "local draft")
+        XCTAssertNotNil(store.sourceChangeMessage)
     }
 
     func testDiscardRestoresLoadedContent() async {

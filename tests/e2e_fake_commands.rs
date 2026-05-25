@@ -192,6 +192,25 @@ fn task_source_read_write_append_roundtrip() {
     let append_json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(append_json["append_offset_bytes"].as_u64(), Some(4));
     assert_eq!(append_json["bytes_appended"].as_u64(), Some(6));
+
+    let events_path = home.join("projects").join(&project_id).join("events.jsonl");
+    let events_raw = std::fs::read_to_string(events_path).unwrap();
+    let change_events: Vec<serde_json::Value> = events_raw
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .filter(|event: &serde_json::Value| {
+            event["event_type"].as_str() == Some("task_source_file_changed")
+        })
+        .collect();
+    assert_eq!(change_events.len(), 2);
+    assert_eq!(
+        change_events[1]["payload"]["task_source_file"].as_str(),
+        Some(tasks.to_str().unwrap())
+    );
+    assert_eq!(
+        change_events[1]["payload"]["new_hash"].as_str(),
+        append_json["hash"].as_str()
+    );
 }
 
 #[test]

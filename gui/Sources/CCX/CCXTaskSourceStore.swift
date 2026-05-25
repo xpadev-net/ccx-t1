@@ -15,6 +15,7 @@ final class CCXTaskSourceStore {
     private(set) var conflictMessage: String?
     private(set) var composerErrorMessage: String?
     private(set) var composerStatusMessage: String?
+    private(set) var sourceChangeMessage: String?
     var composerInput = ""
     var desiredTaskFormat = String(
         localized: "ccx.defaultTaskFormat",
@@ -81,6 +82,7 @@ final class CCXTaskSourceStore {
         do {
             let loaded = try await cli().readTaskSource(projectId: projectId)
             apply(snapshot: loaded)
+            sourceChangeMessage = nil
         } catch {
             errorMessage = Self.message(for: error)
         }
@@ -91,11 +93,23 @@ final class CCXTaskSourceStore {
         await load()
     }
 
+    func handleTaskSourceChanged() async {
+        if isDirty {
+            sourceChangeMessage = String(
+                localized: "ccx.tasks.source.changedDirty",
+                defaultValue: "Task source changed on disk. Reload after saving or discarding your local edits."
+            )
+            return
+        }
+        await load()
+    }
+
     func discardChanges() {
         guard let snapshot else { return }
         draftContent = snapshot.content
         conflictMessage = nil
         errorMessage = nil
+        sourceChangeMessage = nil
     }
 
     func clearComposerStatusMessage() {
@@ -202,11 +216,12 @@ final class CCXTaskSourceStore {
         \(request)
 
         Instructions:
-        - Inspect the repository code before changing the task source when code context is needed.
-        - Split and detail the request into actionable task-source entries when useful.
-        - Update the task source file with the refined task content.
-        - Preserve the GUI original request in the task source entry or nearby context.
-        - Do not overwrite unrelated task source content.
+            - Inspect the repository code before changing the task source when code context is needed.
+            - Split and detail the request into actionable task-source entries when useful.
+            - Update the task source file with the refined task content.
+            - Prefer `ccx task-source append` or `ccx task-source write` so the controller records the reflection event.
+            - Preserve the GUI original request in the task source entry or nearby context.
+            - Do not overwrite unrelated task source content.
         """
     }
 

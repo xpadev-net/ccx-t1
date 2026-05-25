@@ -78,6 +78,8 @@ public struct CCXEventEntry: Identifiable, Hashable, Sendable {
     public let kind: String
     public let actor: String
     public let timestamp: String
+    public let taskSourceFile: String?
+    public let newHash: String?
     public let raw: String
 
     public var id: String { eventId }

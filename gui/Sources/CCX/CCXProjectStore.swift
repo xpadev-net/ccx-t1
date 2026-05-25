@@ -354,12 +354,15 @@ extension CCXProjectStore {
                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                     continue
                 }
+                let payload = json["payload"] as? [String: Any]
                 entries.append(CCXEventEntry(
                     eventId: (json["event_id"] as? String) ?? UUID().uuidString,
                     projectId: (json["project_id"] as? String) ?? "",
-                    kind: (json["kind"] as? String) ?? "unknown",
+                    kind: (json["event_type"] as? String) ?? (json["kind"] as? String) ?? "unknown",
                     actor: (json["actor"] as? String) ?? "",
-                    timestamp: (json["timestamp"] as? String) ?? "",
+                    timestamp: (json["occurred_at"] as? String) ?? (json["timestamp"] as? String) ?? "",
+                    taskSourceFile: (payload?["task_source_file"] as? String) ?? (json["task_source_file"] as? String),
+                    newHash: (payload?["new_hash"] as? String) ?? (json["new_hash"] as? String),
                     raw: raw
                 ))
             }
