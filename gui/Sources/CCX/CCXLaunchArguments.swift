@@ -49,6 +49,7 @@ public struct CCXLaunchArguments: Sendable {
                 isCCXLaunch = true
             }
         }
-        return CCXLaunchArguments(projectId: projectId, isCCXLaunch: isCCXLaunch)
+        let normalizedProjectId = projectId?.isEmpty == false ? projectId : nil
+        return CCXLaunchArguments(projectId: normalizedProjectId, isCCXLaunch: isCCXLaunch)
     }
 }
