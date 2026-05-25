@@ -15,7 +15,7 @@ public struct CCXProjectPickerRowModel: Identifiable, Equatable {
 }
 
 public struct CCXProjectPickerView: View {
-    @Bindable var store: CCXProjectsStore
+    let store: CCXProjectsStore
     let onOpenProject: (CCXProjectSummary) -> Void
     @State private var isAddProjectPresented = false
 

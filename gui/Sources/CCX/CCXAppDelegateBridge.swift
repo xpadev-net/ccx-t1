@@ -1,5 +1,11 @@
 import AppKit
 import Foundation
+import os
+
+nonisolated private let ccxDashboardOpenLogger = Logger(
+    subsystem: "com.cmuxterm.app",
+    category: "CCXDashboardOpen"
+)
 
 /// Glue between the `ccx project open <id>` CLI and cmux's existing
 /// main-window / workspace plumbing. Called from
@@ -44,6 +50,7 @@ extension AppDelegate {
             return mainWindowContexts.values.first { $0.windowId == windowId }
         }()
         guard let context else {
+            ccxDashboardOpenLogger.error("ccx.dashboardOpen.failed reason=no_main_window_context source=\(debugSource, privacy: .private(mask: .hash)) projectId=\(projectId ?? "<picker>", privacy: .private(mask: .hash))")
 #if DEBUG
             cmuxDebugLog("ccx.dashboardOpen.failed reason=no_main_window_context source=\(debugSource) projectId=\(projectId ?? "<picker>")")
 #endif
@@ -58,6 +65,7 @@ extension AppDelegate {
             ?? context.tabManager.addWorkspace(workingDirectory: nil, select: true)
         guard let paneId = workspace.bonsplitController.focusedPaneId
             ?? workspace.bonsplitController.allPaneIds.first else {
+            ccxDashboardOpenLogger.error("ccx.dashboardOpen.failed reason=no_pane source=\(debugSource, privacy: .private(mask: .hash)) projectId=\(projectId ?? "<picker>", privacy: .private(mask: .hash)) workspace=\(workspace.id.uuidString, privacy: .private(mask: .hash))")
 #if DEBUG
             cmuxDebugLog("ccx.dashboardOpen.failed reason=no_pane source=\(debugSource) projectId=\(projectId ?? "<picker>") workspace=\(workspace.id.uuidString)")
 #endif

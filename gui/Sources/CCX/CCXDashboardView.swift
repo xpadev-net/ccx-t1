@@ -112,7 +112,7 @@ public struct CCXDashboardView: View {
 }
 
 private struct CCXProjectSwitchMenu: View {
-    @Bindable var projectsStore: CCXProjectsStore
+    let projectsStore: CCXProjectsStore
     let currentProjectId: String?
     let onOpenProject: (CCXProjectSummary) -> Void
 
