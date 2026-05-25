@@ -160,6 +160,30 @@ public struct CCXTaskSourceAppendResult: Hashable, Sendable, Decodable {
     }
 }
 
+public struct CCXAgentStartResult: Hashable, Sendable, Decodable {
+    public let agentSessionId: String
+    public let projectId: String
+    public let role: String
+    public let status: String
+
+    private enum CodingKeys: String, CodingKey {
+        case agentSessionId = "agent_session_id"
+        case projectId = "project_id"
+        case role
+        case status
+    }
+}
+
+public struct CCXAgentPromptResult: Hashable, Sendable, Decodable {
+    public let sessionId: String
+    public let status: String
+
+    private enum CodingKeys: String, CodingKey {
+        case sessionId = "session_id"
+        case status
+    }
+}
+
 /// Lifecycle states the controller writes to `work_executions.state`.
 /// Mirrors `crate::domain::work_execution::WorkExecutionState`.
 public enum CCXWorkExecutionState: String, CaseIterable, Sendable {

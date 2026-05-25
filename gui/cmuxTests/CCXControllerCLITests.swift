@@ -247,6 +247,56 @@ final class CCXControllerCLITests: XCTestCase {
         XCTAssertEqual(result.bytesAppended, 4)
     }
 
+    func testStartOrchestratorPassesProjectIdAndDecodesResult() async throws {
+        let stdout = """
+        {
+          "agent_session_id": "sess_1",
+          "project_id": "p_123",
+          "role": "orchestrator",
+          "status": "started"
+        }
+        """.data(using: .utf8)!
+        var capturedArguments: [String] = []
+        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, arguments, stdin in
+            capturedArguments = arguments
+            XCTAssertNil(stdin)
+            return CCXControllerCLIProcessResult(exitCode: 0, stdout: stdout, stderr: Data())
+        }
+
+        let started = try await cli.startOrchestrator(projectId: "p_123")
+
+        XCTAssertEqual(capturedArguments, [
+            "agent", "start-orchestrator", "--project-id", "p_123", "--json",
+        ])
+        XCTAssertEqual(started.agentSessionId, "sess_1")
+        XCTAssertEqual(started.role, "orchestrator")
+    }
+
+    func testPromptAgentPassesMessageViaStdinAndDecodesResult() async throws {
+        let stdout = """
+        {
+          "session_id": "sess_1",
+          "status": "sent"
+        }
+        """.data(using: .utf8)!
+        var capturedArguments: [String] = []
+        var capturedStdin: Data?
+        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, arguments, stdin in
+            capturedArguments = arguments
+            capturedStdin = stdin
+            return CCXControllerCLIProcessResult(exitCode: 0, stdout: stdout, stderr: Data())
+        }
+
+        let prompted = try await cli.promptAgent(sessionId: "sess_1", message: "hello")
+
+        XCTAssertEqual(capturedArguments, [
+            "agent", "prompt", "--session-id", "sess_1", "--stdin", "--json",
+        ])
+        XCTAssertEqual(String(data: capturedStdin ?? Data(), encoding: .utf8), "hello")
+        XCTAssertEqual(prompted.sessionId, "sess_1")
+        XCTAssertEqual(prompted.status, "sent")
+    }
+
     func testRegisterTimeoutTerminatesProcess() async throws {
         let executable = try makeFile(named: "ccx", content: "#!/bin/sh\nsleep 60\n")
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)

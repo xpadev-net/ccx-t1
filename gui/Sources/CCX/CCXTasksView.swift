@@ -4,16 +4,28 @@ import SwiftUI
 
 public struct CCXTasksView: View {
     let project: CCXProjectSummary?
+    let workExecutions: [CCXWorkExecution]
+    let agentSessions: [CCXAgentSession]
 
-    public init(project: CCXProjectSummary?) {
+    public init(
+        project: CCXProjectSummary?,
+        workExecutions: [CCXWorkExecution] = [],
+        agentSessions: [CCXAgentSession] = []
+    ) {
         self.project = project
+        self.workExecutions = workExecutions
+        self.agentSessions = agentSessions
     }
 
     public var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 if let project {
-                    CCXTaskSourcePanel(project: project)
+                    CCXTaskSourcePanel(
+                        project: project,
+                        workExecutions: workExecutions,
+                        orchestratorSessionId: Self.activeOrchestratorSessionId(agentSessions)
+                    )
                         .id(project.projectId)
                 } else {
                     placeholderView(String(localized: "ccx.tasks.loading",
@@ -24,15 +36,30 @@ public struct CCXTasksView: View {
             .padding(12)
         }
     }
+
+    private static func activeOrchestratorSessionId(_ sessions: [CCXAgentSession]) -> String? {
+        sessions.first { session in
+            session.role == "orchestrator"
+                && ["starting", "running", "idle"].contains(session.state)
+        }?.agentSessionId
+    }
 }
 
 private struct CCXTaskSourcePanel: View {
     let project: CCXProjectSummary
+    let workExecutions: [CCXWorkExecution]
+    let orchestratorSessionId: String?
     @State private var status: CCXTaskSourceFileStatus
     @State private var sourceStore: CCXTaskSourceStore
 
-    init(project: CCXProjectSummary) {
+    init(
+        project: CCXProjectSummary,
+        workExecutions: [CCXWorkExecution],
+        orchestratorSessionId: String?
+    ) {
         self.project = project
+        self.workExecutions = workExecutions
+        self.orchestratorSessionId = orchestratorSessionId
         self._status = State(initialValue: CCXTaskSourceFileStatus.checking(path: project.taskSourceFile))
         self._sourceStore = State(initialValue: CCXTaskSourceStore(projectId: project.projectId))
     }
@@ -110,6 +137,44 @@ private struct CCXTaskSourcePanel: View {
                             .stroke(.separator.opacity(0.7))
                     )
                     .disabled(sourceStore.isLoading || sourceStore.isSaving || !status.canOpen)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(String(localized: "ccx.tasks.composer.title", defaultValue: "Add task with Orchestrator"))
+                    .font(.headline)
+                TextEditor(text: $sourceStore.composerInput)
+                    .font(.body)
+                    .scrollContentBackground(.hidden)
+                    .frame(minHeight: 96)
+                    .background(.background, in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(.separator.opacity(0.7))
+                    )
+                    .disabled(sourceStore.isComposing || !status.canOpen)
+                if let status = sourceStore.composerStatusMessage {
+                    Text(status)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                if let error = sourceStore.composerErrorMessage {
+                    Text(error)
+                        .font(.callout)
+                        .foregroundStyle(.red)
+                }
+                Button {
+                    Task {
+                        await sourceStore.submitNaturalLanguageTask(
+                            project: project,
+                            workExecutions: workExecutions,
+                            orchestratorSessionId: orchestratorSessionId
+                        )
+                    }
+                } label: {
+                    Label(String(localized: "ccx.tasks.composer.submit", defaultValue: "Refine with LLM and Add"),
+                          systemImage: "sparkles")
+                }
+                .disabled(!sourceStore.canSubmitComposer || sourceStore.isComposing || !status.canOpen)
             }
 
             HStack(spacing: 8) {

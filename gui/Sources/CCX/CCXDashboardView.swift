@@ -62,7 +62,11 @@ public struct CCXDashboardView: View {
                 case .reviews:
                     CCXReviewsView(store: store)
                 case .tasks:
-                    CCXTasksView(project: store.project)
+                    CCXTasksView(
+                        project: store.project,
+                        workExecutions: store.workExecutions,
+                        agentSessions: store.agentSessions
+                    )
                 case .artifacts:
                     CCXArtifactsView(store: store)
                 }

@@ -174,6 +174,107 @@ final class CCXTaskSourceStoreTests: XCTestCase {
         XCTAssertFalse(store.warningMessage?.contains("backend text") ?? true)
     }
 
+    func testOrchestratorPromptIncludesProjectStateFormatAndOriginalRequest() {
+        let prompt = CCXTaskSourceStore.orchestratorPrompt(
+            request: "Add export support",
+            project: Self.project,
+            workExecutions: [
+                CCXWorkExecution(
+                    workExecutionId: "we_1",
+                    projectId: "p_123",
+                    state: "running",
+                    branchName: "codex/export",
+                    worktreePath: "/repo/.ccx/we_1",
+                    taskFilePath: "/ccx/we_1/task.md",
+                    prNumber: nil,
+                    prUrl: nil,
+                    headCommit: nil,
+                    displayText: "Existing task",
+                    selectedAt: "2026-05-26T00:00:00Z",
+                    artifactState: "pending",
+                    syncStatus: "pending"
+                ),
+            ],
+            desiredTaskFormat: "- [ ] title"
+        )
+
+        XCTAssertTrue(prompt.contains("canonical_repo: /repo"))
+        XCTAssertTrue(prompt.contains("task_source_file: /repo/z/tasks.md"))
+        XCTAssertTrue(prompt.contains("we_1: state=running"))
+        XCTAssertTrue(prompt.contains("- [ ] title"))
+        XCTAssertTrue(prompt.contains("Add export support"))
+        XCTAssertTrue(prompt.contains("Inspect the repository code"))
+        XCTAssertTrue(prompt.contains("Preserve the GUI original request"))
+    }
+
+    func testComposerPromptsExistingOrchestratorSession() async {
+        var capturedPrompt: String?
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, arguments, stdin in
+                XCTAssertEqual(arguments, [
+                    "agent", "prompt", "--session-id", "sess_existing", "--stdin", "--json",
+                ])
+                capturedPrompt = String(data: stdin ?? Data(), encoding: .utf8)
+                return .success(Self.result(stdout: """
+                {
+                  "session_id": "sess_existing",
+                  "status": "sent"
+                }
+                """))
+            })
+        }
+        store.composerInput = "Add export support"
+
+        await store.submitNaturalLanguageTask(
+            project: Self.project,
+            workExecutions: [],
+            orchestratorSessionId: "sess_existing"
+        )
+
+        XCTAssertEqual(store.composerInput, "")
+        XCTAssertNotNil(store.composerStatusMessage)
+        XCTAssertNil(store.composerErrorMessage)
+        XCTAssertTrue(capturedPrompt?.contains("Add export support") ?? false)
+    }
+
+    func testComposerStartsOrchestratorWhenMissingThenPrompts() async {
+        var calls: [[String]] = []
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, arguments, _ in
+                calls.append(arguments)
+                if arguments.contains("start-orchestrator") {
+                    return .success(Self.result(stdout: """
+                    {
+                      "agent_session_id": "sess_started",
+                      "project_id": "p_123",
+                      "role": "orchestrator",
+                      "status": "started"
+                    }
+                    """))
+                }
+                return .success(Self.result(stdout: """
+                {
+                  "session_id": "sess_started",
+                  "status": "sent"
+                }
+                """))
+            })
+        }
+        store.composerInput = "Add export support"
+
+        await store.submitNaturalLanguageTask(
+            project: Self.project,
+            workExecutions: [],
+            orchestratorSessionId: nil
+        )
+
+        XCTAssertEqual(calls, [
+            ["agent", "start-orchestrator", "--project-id", "p_123", "--json"],
+            ["agent", "prompt", "--session-id", "sess_started", "--stdin", "--json"],
+        ])
+        XCTAssertNil(store.composerErrorMessage)
+    }
+
     func testDiscardRestoresLoadedContent() async {
         let store = CCXTaskSourceStore(projectId: "p_123") {
             .success(Self.cli { _, _, _ in
@@ -217,4 +318,12 @@ final class CCXTaskSourceStoreTests: XCTestCase {
             stderr: Data()
         )
     }
+
+    private static let project = CCXProjectSummary(
+        projectId: "p_123",
+        displaySlug: "repo",
+        canonicalRepo: "/repo",
+        taskSourceFile: "/repo/z/tasks.md",
+        createdAt: "2026-05-26T00:00:00Z"
+    )
 }
