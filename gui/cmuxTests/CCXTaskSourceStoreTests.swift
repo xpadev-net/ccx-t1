@@ -322,6 +322,91 @@ final class CCXTaskSourceStoreTests: XCTestCase {
         )
     }
 
+    func testComposerClearsStaleCacheAndUsesLiveSessionAfterPromptFailure() async {
+        var calls: [[String]] = []
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, arguments, _ in
+                calls.append(arguments)
+                if arguments.contains("start-orchestrator") {
+                    return .success(Self.result(stdout: """
+                    {
+                      "agent_session_id": "sess_stale",
+                      "project_id": "p_123",
+                      "role": "orchestrator",
+                      "status": "started"
+                    }
+                    """))
+                }
+                if arguments.contains("sess_stale") {
+                    return .success(CCXControllerCLIProcessResult(
+                        exitCode: 1,
+                        stdout: Data(),
+                        stderr: Data("session stopped".utf8)
+                    ))
+                }
+                return .success(Self.result(stdout: """
+                {
+                  "session_id": "sess_live",
+                  "status": "sent"
+                }
+                """))
+            })
+        }
+
+        store.composerInput = "First request"
+        await store.submitNaturalLanguageTask(
+            project: Self.project,
+            workExecutions: [],
+            orchestratorSessionId: nil
+        )
+        XCTAssertNotNil(store.composerErrorMessage)
+
+        store.composerInput = "Second request"
+        await store.submitNaturalLanguageTask(
+            project: Self.project,
+            workExecutions: [],
+            orchestratorSessionId: "sess_live"
+        )
+
+        XCTAssertEqual(
+            calls,
+            [
+                ["agent", "start-orchestrator", "--project-id", "p_123", "--json"],
+                ["agent", "prompt", "--session-id", "sess_stale", "--stdin", "--json"],
+                ["agent", "prompt", "--session-id", "sess_live", "--stdin", "--json"],
+            ]
+        )
+        XCTAssertNil(store.composerErrorMessage)
+        XCTAssertNotNil(store.composerStatusMessage)
+    }
+
+    func testComposerUsesDedicatedPromptErrorMessage() async {
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, _, _ in
+                .success(CCXControllerCLIProcessResult(
+                    exitCode: 1,
+                    stdout: Data(),
+                    stderr: Data("prompt failed".utf8)
+                ))
+            })
+        }
+        store.composerInput = "Add export support"
+
+        await store.submitNaturalLanguageTask(
+            project: Self.project,
+            workExecutions: [],
+            orchestratorSessionId: "sess_existing"
+        )
+
+        XCTAssertEqual(
+            store.composerErrorMessage,
+            String(
+                localized: "ccx.tasks.composer.error.generic",
+                defaultValue: "Could not send the request to Orchestrator. Check the agent session, then try again."
+            )
+        )
+    }
+
     func testDiscardRestoresLoadedContent() async {
         let store = CCXTaskSourceStore(projectId: "p_123") {
             .success(Self.cli { _, _, _ in

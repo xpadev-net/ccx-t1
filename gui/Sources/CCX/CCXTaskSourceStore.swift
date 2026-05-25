@@ -144,14 +144,15 @@ final class CCXTaskSourceStore {
         do {
             let cli = try cli()
             let sessionId: String
-            if let cachedOrchestratorSessionId {
-                sessionId = cachedOrchestratorSessionId
-            } else if let orchestratorSessionId, !orchestratorSessionId.isEmpty {
+            if let orchestratorSessionId, !orchestratorSessionId.isEmpty {
                 sessionId = orchestratorSessionId
+                cachedOrchestratorSessionId = nil
+            } else if let cachedOrchestratorSessionId {
+                sessionId = cachedOrchestratorSessionId
             } else {
                 sessionId = try await cli.startOrchestrator(projectId: project.projectId).agentSessionId
+                cachedOrchestratorSessionId = sessionId
             }
-            cachedOrchestratorSessionId = sessionId
             let prompt = Self.orchestratorPrompt(
                 request: request,
                 project: project,
@@ -165,7 +166,8 @@ final class CCXTaskSourceStore {
                 defaultValue: "Sent to Orchestrator."
             )
         } catch {
-            composerErrorMessage = Self.message(for: error)
+            cachedOrchestratorSessionId = nil
+            composerErrorMessage = Self.composerMessage(for: error)
         }
     }
 
@@ -241,5 +243,20 @@ final class CCXTaskSourceStore {
         }
         return String(localized: "ccx.tasks.editor.error.generic",
                       defaultValue: "Could not update the task source. Reload, check the file, then try again.")
+    }
+
+    private static func composerMessage(for error: Error) -> String {
+        if let cliError = error as? CCXControllerCLIError {
+            switch cliError {
+            case .executableNotFound, .notExecutable, .launchFailed:
+                return String(localized: "ccx.tasks.editor.error.cliUnavailable",
+                              defaultValue: "CCX controller CLI is not available. Check the CCX installation, then try again.")
+            case .processFailed, .invalidJSON, .timedOut, .cancelled:
+                return String(localized: "ccx.tasks.composer.error.generic",
+                              defaultValue: "Could not send the request to Orchestrator. Check the agent session, then try again.")
+            }
+        }
+        return String(localized: "ccx.tasks.composer.error.generic",
+                      defaultValue: "Could not send the request to Orchestrator. Check the agent session, then try again.")
     }
 }
