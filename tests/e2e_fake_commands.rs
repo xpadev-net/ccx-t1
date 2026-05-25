@@ -190,8 +190,71 @@ fn task_source_read_write_append_roundtrip() {
     assert_eq!(code, 0, "append failed: {stderr}");
     assert_eq!(std::fs::read_to_string(&tasks).unwrap(), "two\nthree\n");
     let append_json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
-    assert_eq!(append_json["append_offset"].as_u64(), Some(4));
+    assert_eq!(append_json["append_offset_bytes"].as_u64(), Some(4));
     assert_eq!(append_json["bytes_appended"].as_u64(), Some(6));
+}
+
+#[test]
+fn task_source_read_text_outputs_exact_content_without_extra_newline() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("ccx-home");
+    let repo = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let tasks = repo.join("tasks.md");
+    std::fs::write(&tasks, "no trailing newline").unwrap();
+    let project_id = register_project(&home, &repo, &tasks);
+
+    let (code, stdout, stderr) = run_ccx(
+        &["task-source", "read", "--project-id", &project_id],
+        &[],
+        &home,
+    );
+
+    assert_eq!(code, 0, "read failed: {stderr}");
+    assert_eq!(stdout, "no trailing newline");
+}
+
+#[test]
+fn task_source_write_succeeds_when_canonical_repo_is_unreachable() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("ccx-home");
+    let repo = tmp.path().join("repo");
+    let task_dir = tmp.path().join("tasks");
+    std::fs::create_dir_all(&repo).unwrap();
+    std::fs::create_dir_all(&task_dir).unwrap();
+    let tasks = task_dir.join("tasks.md");
+    std::fs::write(&tasks, "one\n").unwrap();
+    let project_id = register_project(&home, &repo, &tasks);
+    let (code, stdout, stderr) = run_ccx(
+        &["task-source", "read", "--project-id", &project_id, "--json"],
+        &[],
+        &home,
+    );
+    assert_eq!(code, 0, "read failed: {stderr}");
+    let read_json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let hash = read_json["hash"].as_str().unwrap().to_string();
+    std::fs::remove_dir_all(&repo).unwrap();
+
+    let (code, stdout, stderr) = run_ccx_with_stdin(
+        &[
+            "task-source",
+            "write",
+            "--project-id",
+            &project_id,
+            "--expected-hash",
+            &hash,
+            "--stdin",
+            "--json",
+        ],
+        "two\n",
+        &[],
+        &home,
+    );
+
+    assert_eq!(code, 0, "write failed: {stderr}");
+    assert_eq!(std::fs::read_to_string(&tasks).unwrap(), "two\n");
+    let write_json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert!(write_json["warning"].is_null());
 }
 
 #[test]

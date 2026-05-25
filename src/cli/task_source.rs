@@ -1,13 +1,15 @@
+use std::fs::OpenOptions;
 use std::io::Read;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 use clap::Args;
+use fd_lock::RwLock;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use crate::config::load_project_config;
 use crate::config::project_config::ProjectConfig;
+use crate::config::{load_project_config, project_dir};
 use crate::error::CcxError;
 use crate::git::repo::check_dirty;
 
@@ -71,7 +73,7 @@ struct TaskSourceAppendOutput {
     path: Utf8PathBuf,
     hash: String,
     mtime: String,
-    append_offset: usize,
+    append_offset_bytes: usize,
     bytes_appended: usize,
     warning: Option<TaskSourceWarning>,
 }
@@ -106,7 +108,7 @@ pub fn read(args: ReadArgs) -> Result<(), CcxError> {
             })?
         );
     } else {
-        println!("{}", loaded.content);
+        print!("{}", loaded.content);
     }
     Ok(())
 }
@@ -120,9 +122,7 @@ pub fn write(args: WriteArgs) -> Result<(), CcxError> {
 
     let config = load_project_config(&args.project_id)?;
     let content = read_stdin()?;
-    ensure_expected_hash(&config, &args.expected_hash)?;
-    std::fs::write(&config.task_source_file, content.as_bytes())?;
-    let loaded = load_task_source(&config)?;
+    let loaded = replace_task_source_with_lock(&config, &args.expected_hash, &content)?;
     let warning = dirty_warning(&config)?;
 
     if args.json {
@@ -152,12 +152,8 @@ pub fn append(args: AppendArgs) -> Result<(), CcxError> {
 
     let config = load_project_config(&args.project_id)?;
     let content = read_stdin()?;
-    let current = ensure_expected_hash(&config, &args.expected_hash)?;
-    let append_offset = current.content.len();
-    let mut next = current.content;
-    next.push_str(&content);
-    std::fs::write(&config.task_source_file, next.as_bytes())?;
-    let loaded = load_task_source(&config)?;
+    let (append_offset_bytes, loaded) =
+        append_task_source_with_lock(&config, &args.expected_hash, &content)?;
     let warning = dirty_warning(&config)?;
 
     if args.json {
@@ -168,7 +164,7 @@ pub fn append(args: AppendArgs) -> Result<(), CcxError> {
                 path: config.task_source_file,
                 hash: loaded.hash,
                 mtime: loaded.mtime,
-                append_offset,
+                append_offset_bytes,
                 bytes_appended: content.len(),
                 warning,
             })?
@@ -191,6 +187,59 @@ fn ensure_expected_hash(
         )));
     }
     Ok(loaded)
+}
+
+fn replace_task_source_with_lock(
+    config: &ProjectConfig,
+    expected_hash: &str,
+    content: &str,
+) -> Result<LoadedTaskSource, CcxError> {
+    with_task_source_lock(config, |current| {
+        ensure_loaded_hash(&current, expected_hash)?;
+        std::fs::write(&config.task_source_file, content.as_bytes())?;
+        load_task_source(config)
+    })
+}
+
+fn append_task_source_with_lock(
+    config: &ProjectConfig,
+    expected_hash: &str,
+    content: &str,
+) -> Result<(usize, LoadedTaskSource), CcxError> {
+    with_task_source_lock(config, |current| {
+        ensure_loaded_hash(&current, expected_hash)?;
+        let append_offset_bytes = current.content.len();
+        let mut next = current.content;
+        next.push_str(content);
+        std::fs::write(&config.task_source_file, next.as_bytes())?;
+        Ok((append_offset_bytes, load_task_source(config)?))
+    })
+}
+
+fn with_task_source_lock<T>(
+    config: &ProjectConfig,
+    f: impl FnOnce(LoadedTaskSource) -> Result<T, CcxError>,
+) -> Result<T, CcxError> {
+    let lock_path = project_dir(&config.project_id)?.join("task-source.lock");
+    let lock_file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(&lock_path)?;
+    let mut rw_lock = RwLock::new(lock_file);
+    let _guard = rw_lock.write()?;
+    let current = load_task_source(config)?;
+    f(current)
+}
+
+fn ensure_loaded_hash(loaded: &LoadedTaskSource, expected_hash: &str) -> Result<(), CcxError> {
+    if loaded.hash != expected_hash {
+        return Err(CcxError::Other(anyhow::anyhow!(
+            "task source conflict: expected hash {expected_hash}, found {}",
+            loaded.hash
+        )));
+    }
+    Ok(())
 }
 
 fn load_task_source(config: &ProjectConfig) -> Result<LoadedTaskSource, CcxError> {
@@ -233,7 +282,12 @@ fn sha256_hex(content: &str) -> String {
 }
 
 fn dirty_warning(config: &ProjectConfig) -> Result<Option<TaskSourceWarning>, CcxError> {
-    if !task_source_is_inside_repo(&config.task_source_file, &config.canonical_repo)? {
+    let inside = match task_source_is_inside_repo(&config.task_source_file, &config.canonical_repo)
+    {
+        Ok(inside) => inside,
+        Err(_) => return Ok(None),
+    };
+    if !inside {
         return Ok(None);
     }
 

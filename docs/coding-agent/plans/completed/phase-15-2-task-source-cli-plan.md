@@ -32,7 +32,7 @@ Repository rule suite status: `docs/coding-agent/rules/` is absent on `master`; 
   - required: true
     owner: orchestrator
     kind: static
-    detail: Run `rtk cargo fmt --check` and a focused `rtk cargo test ...` command selected from repo patterns.
+    detail: Run targeted `rtk rustfmt --check ...` for touched Rust files and focused `rtk cargo test ...` commands selected from repo patterns.
   - required: true
     owner: reviewer
     kind: review
@@ -48,6 +48,7 @@ Repository rule suite status: `docs/coding-agent/rules/` is absent on `master`; 
 - 2026-05-26: Implemented `task-source read/write/append`, added compiled-binary E2E coverage, and validated with focused `cargo test task_source`. Repo-wide `cargo fmt --check` is blocked by pre-existing formatting drift, so targeted rustfmt is used for touched Rust files.
 - 2026-05-26: Reviewer found a delayed-stdin conflict race; changed write/append to read stdin before validating the expected hash and added delayed-stdin regression tests for both commands.
 - 2026-05-26: Re-review approved the implementation; marked the 15.2 checklist complete and moved this plan to completed.
+- 2026-05-26: `gh-review-hook` reported post-write dirty warning failures, raw read newline drift, ambiguous append offset units, and a verify/write TOCTOU gap; made dirty warnings best-effort, changed raw read to `print!`, renamed append offset JSON field to `append_offset_bytes`, and moved hash verification plus writes under a task-source lock.
 
 ## Decision Log
 
