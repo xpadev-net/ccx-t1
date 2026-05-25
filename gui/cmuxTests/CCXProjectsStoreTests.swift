@@ -12,7 +12,16 @@ final class CCXProjectsStoreTests: XCTestCase {
 
     override func tearDownWithError() throws {
         for dir in tempDirs {
-            try? FileManager.default.removeItem(at: dir)
+            do {
+                try FileManager.default.removeItem(at: dir)
+            } catch {
+                let nsError = error as NSError
+                if nsError.domain == NSCocoaErrorDomain,
+                   nsError.code == NSFileNoSuchFileError {
+                    continue
+                }
+                throw error
+            }
         }
         tempDirs.removeAll()
         try super.tearDownWithError()

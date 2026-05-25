@@ -1,6 +1,25 @@
 import Foundation
 import Observation
 
+private final class CCXProjectsStoreEventCallbackBox: @unchecked Sendable {
+    let handleEvent: @Sendable () -> Void
+
+    init(handleEvent: @escaping @Sendable () -> Void) {
+        self.handleEvent = handleEvent
+    }
+}
+
+private let ccxProjectsStoreEventRetain: CFAllocatorRetainCallBack = { info in
+    guard let info else { return nil }
+    _ = Unmanaged<CCXProjectsStoreEventCallbackBox>.fromOpaque(info).retain()
+    return info
+}
+
+private let ccxProjectsStoreEventRelease: CFAllocatorReleaseCallBack = { info in
+    guard let info else { return }
+    Unmanaged<CCXProjectsStoreEventCallbackBox>.fromOpaque(info).release()
+}
+
 /// Reads the global CCX project index from `$CCX_HOME/projects.json`.
 ///
 /// This store is read-only. Project mutations must go through the controller
@@ -76,20 +95,23 @@ public final class CCXProjectsStore {
 
     private func startWatching() {
         guard eventStream == nil else { return }
+        let callbackBox = CCXProjectsStoreEventCallbackBox { [weak self] in
+            Task { @MainActor in self?.refresh() }
+        }
         let context = UnsafeMutablePointer<FSEventStreamContext>.allocate(capacity: 1)
         context.pointee = FSEventStreamContext(
             version: 0,
-            info: Unmanaged.passUnretained(self).toOpaque(),
-            retain: nil,
-            release: nil,
+            info: Unmanaged.passUnretained(callbackBox).toOpaque(),
+            retain: ccxProjectsStoreEventRetain,
+            release: ccxProjectsStoreEventRelease,
             copyDescription: nil
         )
         defer { context.deallocate() }
 
         let callback: FSEventStreamCallback = { _, info, _, _, _, _ in
             guard let info = info else { return }
-            let store = Unmanaged<CCXProjectsStore>.fromOpaque(info).takeUnretainedValue()
-            Task { @MainActor in store.refresh() }
+            let box = Unmanaged<CCXProjectsStoreEventCallbackBox>.fromOpaque(info).takeUnretainedValue()
+            box.handleEvent()
         }
 
         let pathsArray = [paths.ccxHome.path as CFString] as CFArray
@@ -105,7 +127,11 @@ public final class CCXProjectsStore {
             return
         }
         FSEventStreamSetDispatchQueue(stream, eventQueue)
-        FSEventStreamStart(stream)
+        guard FSEventStreamStart(stream) else {
+            FSEventStreamInvalidate(stream)
+            FSEventStreamRelease(stream)
+            return
+        }
         eventStream = stream
     }
 

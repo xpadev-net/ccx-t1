@@ -18,8 +18,8 @@
 - acceptance:
   - `CCXProjectsStore` publishes all registered projects as `[CCXProjectSummary]`.
   - The store reads `$CCX_HOME/projects.json` and supplements entries from per-project `project.json` when available.
-  - Disk I/O happens on a background queue and `@Published` updates happen on the main actor.
-  - The store watches the CCX home with `FSEventStream` and coalesces refreshes using the existing single-project store pattern.
+  - Disk I/O is offloaded through a detached task and `@Observable` state updates happen on the main actor.
+  - The store watches the CCX home with `FSEventStream` and coalesces refreshes through the tracked detached task lifecycle.
   - Unit tests cover snapshot loading, fallback summaries, and invalid index handling.
 - validation:
   - required: true
@@ -55,6 +55,7 @@
 - 2026-05-25: Targeted `xcodebuild` for `cmuxTests/CCXProjectsStoreTests` is blocked before test execution by the existing checkout dependency error: `Ghostty submodule is missing at /Users/xpadev/IdeaProjects/ccx-t1/gui/ghostty`.
 - 2026-05-25: Reviewer subagent approved the change set with the same `gui/ghostty` validation caveat.
 - 2026-05-25: `gh-review-hook` requested replacing the new store's Combine/DispatchQueue refresh path with a tracked task lifecycle. Updated `CCXProjectsStore` to `@Observable`, offloaded snapshot reads through a cancellable detached task, and kept state writes on the main actor.
+- 2026-05-25: `gh-review-hook` requested FSEvent lifetime hardening and documentation cleanup. Updated the stream context to retain a callback box, added `FSEventStreamStart` failure cleanup, tightened test teardown errors, and aligned P14.2 wording with `@Observable`.
 
 ## Decision Log
 
