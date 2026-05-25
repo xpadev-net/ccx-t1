@@ -1,20 +1,26 @@
 import Foundation
-import Combine
+import Observation
 
 /// Reads the global CCX project index from `$CCX_HOME/projects.json`.
 ///
 /// This store is read-only. Project mutations must go through the controller
 /// CLI so the Rust side remains the event-sourcing owner.
 @MainActor
-public final class CCXProjectsStore: ObservableObject {
-    @Published public private(set) var projects: [CCXProjectSummary] = []
-    @Published public private(set) var lastRefreshError: String?
+@Observable
+public final class CCXProjectsStore {
+    public private(set) var projects: [CCXProjectSummary] = []
+    public private(set) var lastRefreshError: String?
 
+    @ObservationIgnored
     private let paths: Paths
 
+    @ObservationIgnored
     private var eventStream: FSEventStreamRef?
-    private let refreshQueue = DispatchQueue(label: "ccx.projects-store.refresh")
-    private var isRefreshing = false
+    @ObservationIgnored
+    private let eventQueue = DispatchQueue(label: "ccx.projects-store.events")
+    @ObservationIgnored
+    private var refreshTask: Task<Void, Never>?
+    @ObservationIgnored
     private var refreshPending = false
 
     public init(ccxHome: URL? = nil) {
@@ -26,6 +32,7 @@ public final class CCXProjectsStore: ObservableObject {
     }
 
     nonisolated deinit {
+        refreshTask?.cancel()
         if let stream = eventStream {
             FSEventStreamStop(stream)
             FSEventStreamInvalidate(stream)
@@ -39,22 +46,30 @@ public final class CCXProjectsStore: ObservableObject {
     }
 
     public func refresh() {
-        if isRefreshing {
+        if refreshTask != nil {
             refreshPending = true
             return
         }
-        isRefreshing = true
         let paths = self.paths
-        refreshQueue.async {
-            let snapshot = Snapshot.load(paths: paths)
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                self.apply(snapshot: snapshot)
-                self.isRefreshing = false
-                if self.refreshPending {
-                    self.refreshPending = false
-                    self.refresh()
-                }
+        let loadTask = Task.detached(priority: .utility) {
+            Snapshot.load(paths: paths)
+        }
+        refreshTask = Task { [weak self] in
+            let snapshot = await withTaskCancellationHandler {
+                await loadTask.value
+            } onCancel: {
+                loadTask.cancel()
+            }
+            guard let self else { return }
+            guard !Task.isCancelled else {
+                self.refreshTask = nil
+                return
+            }
+            self.apply(snapshot: snapshot)
+            self.refreshTask = nil
+            if self.refreshPending {
+                self.refreshPending = false
+                self.refresh()
             }
         }
     }
@@ -89,7 +104,7 @@ public final class CCXProjectsStore: ObservableObject {
         ) else {
             return
         }
-        FSEventStreamSetDispatchQueue(stream, refreshQueue)
+        FSEventStreamSetDispatchQueue(stream, eventQueue)
         FSEventStreamStart(stream)
         eventStream = stream
     }

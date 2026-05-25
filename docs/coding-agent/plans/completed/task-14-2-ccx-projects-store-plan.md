@@ -54,6 +54,7 @@
 - 2026-05-25: Validation passed: `rtk plutil -lint gui/cmux.xcodeproj/project.pbxproj`; `rtk bash gui/scripts/lint-pbxproj-test-wiring.sh --repo-root gui`; `git diff --check`; localization JSON parse; Swift typecheck for `CCXModels`, `CCXProjectStore`, and `CCXProjectsStore`.
 - 2026-05-25: Targeted `xcodebuild` for `cmuxTests/CCXProjectsStoreTests` is blocked before test execution by the existing checkout dependency error: `Ghostty submodule is missing at /Users/xpadev/IdeaProjects/ccx-t1/gui/ghostty`.
 - 2026-05-25: Reviewer subagent approved the change set with the same `gui/ghostty` validation caveat.
+- 2026-05-25: `gh-review-hook` requested replacing the new store's Combine/DispatchQueue refresh path with a tracked task lifecycle. Updated `CCXProjectsStore` to `@Observable`, offloaded snapshot reads through a cancellable detached task, and kept state writes on the main actor.
 
 ## Decision Log
 
