@@ -507,7 +507,7 @@ final class CCXTaskSourceStore {
     }
 }
 
-struct CCXTaskSourceWorkItemCandidate: Identifiable, Hashable {
+struct CCXTaskSourceWorkItemCandidate: Identifiable, Hashable, Sendable {
     let id: String
     let selectorType: String
     let selectorValue: String
