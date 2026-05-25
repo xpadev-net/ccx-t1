@@ -142,6 +142,30 @@ final class CCXProjectPickerTests: XCTestCase {
         XCTAssertEqual(form.trimmedTaskSourceFilePath, taskSource.path)
     }
 
+    @MainActor
+    func testRegistrationViewModelCachesValidationUntilExplicitValidate() throws {
+        let repo = try temporaryDirectory()
+        let taskSource = try makeFile(named: "tasks.md", in: repo)
+        let viewModel = CCXProjectRegistrationViewModel(
+            form: CCXProjectRegistrationFormState(
+                repositoryPath: repo.path,
+                taskSourceFilePath: taskSource.path
+            )
+        )
+
+        XCTAssertNil(viewModel.validationError)
+        XCTAssertTrue(viewModel.canSubmit)
+
+        XCTAssertFalse(viewModel.validate())
+        XCTAssertEqual(viewModel.validationError, .repositoryMissingGitDirectory)
+        XCTAssertFalse(viewModel.canSubmit)
+
+        viewModel.form.repositoryPath = ""
+
+        XCTAssertNil(viewModel.validationError)
+        XCTAssertFalse(viewModel.canSubmit)
+    }
+
     func testRegistrationViewModelSubmitsThroughControllerCLI() async throws {
         let repo = try temporaryDirectory()
         try FileManager.default.createDirectory(
@@ -301,6 +325,34 @@ final class CCXProjectPickerTests: XCTestCase {
         XCTAssertFalse(viewModel.errorMessage?.contains("CCX_CLI") ?? true)
         XCTAssertFalse(viewModel.errorMessage?.contains("CCX_HOME") ?? true)
         XCTAssertFalse(viewModel.errorMessage?.contains("PATH") ?? true)
+    }
+
+    func testRegistrationViewModelShowsSafeMessageForCLITimeout() async throws {
+        let repo = try temporaryDirectory()
+        try FileManager.default.createDirectory(
+            at: repo.appendingPathComponent(".git", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        let taskSource = try makeFile(named: "tasks.md", in: repo)
+        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, _ in
+            throw CCXControllerCLIError.timedOut(seconds: 120)
+        }
+        let viewModel = CCXProjectRegistrationViewModel(
+            form: CCXProjectRegistrationFormState(
+                repositoryPath: repo.path,
+                taskSourceFilePath: taskSource.path
+            ),
+            cliProvider: { .success(cli) }
+        )
+
+        let registered = await viewModel.submit()
+
+        XCTAssertNil(registered)
+        XCTAssertEqual(
+            viewModel.errorMessage,
+            "Could not register the project. Check the selected repository and task source, then try again."
+        )
+        XCTAssertFalse(viewModel.errorMessage?.contains("120") ?? true)
     }
 
     func testRegistrationViewModelIgnoresDuplicateSubmitWhileRegistering() async throws {

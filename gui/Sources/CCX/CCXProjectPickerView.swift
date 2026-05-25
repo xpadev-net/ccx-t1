@@ -249,6 +249,7 @@ private struct CCXProjectRegistrationSheet: View {
         panel.prompt = String(localized: "ccx.projectRegistration.choose", defaultValue: "Choose")
         if await runOpenPanel(panel) == .OK, let url = panel.url {
             viewModel.form.repositoryPath = url.path
+            viewModel.validate()
         }
     }
 
@@ -262,6 +263,7 @@ private struct CCXProjectRegistrationSheet: View {
         panel.prompt = String(localized: "ccx.projectRegistration.choose", defaultValue: "Choose")
         if await runOpenPanel(panel) == .OK, let url = panel.url {
             viewModel.form.taskSourceFilePath = url.path
+            viewModel.validate()
         }
     }
 

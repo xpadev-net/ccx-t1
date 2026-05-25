@@ -18,6 +18,10 @@ public struct CCXProjectRegistrationFormState: Equatable {
         taskSourceFilePath.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    public var hasRequiredPaths: Bool {
+        !trimmedRepositoryPath.isEmpty && !trimmedTaskSourceFilePath.isEmpty
+    }
+
     public func validationError(fileManager: FileManager = .default) -> CCXProjectRegistrationValidationError? {
         let repository = trimmedRepositoryPath
         guard !repository.isEmpty else { return .emptyRepository }
@@ -87,9 +91,16 @@ public enum CCXProjectRegistrationValidationError: Error, Equatable, LocalizedEr
 final class CCXProjectRegistrationViewModel {
     typealias CLIProvider = () -> Result<CCXControllerCLI, CCXControllerCLIError>
 
-    var form: CCXProjectRegistrationFormState
+    var form: CCXProjectRegistrationFormState {
+        didSet {
+            guard form != oldValue else { return }
+            validationError = nil
+            errorMessage = nil
+        }
+    }
     private(set) var isSubmitting = false
     private(set) var errorMessage: String?
+    private(set) var validationError: CCXProjectRegistrationValidationError?
 
     private let fileManager: FileManager
     private let cliProvider: CLIProvider
@@ -104,21 +115,26 @@ final class CCXProjectRegistrationViewModel {
         self.cliProvider = cliProvider
     }
 
-    var validationError: CCXProjectRegistrationValidationError? {
-        form.validationError(fileManager: fileManager)
-    }
-
     var canSubmit: Bool {
-        validationError == nil && !isSubmitting
+        form.hasRequiredPaths && validationError == nil && !isSubmitting
     }
 
     func clearSubmitError() {
         errorMessage = nil
     }
 
+    @discardableResult
+    func validate() -> Bool {
+        validationError = form.validationError(fileManager: fileManager)
+        if validationError != nil {
+            errorMessage = nil
+        }
+        return validationError == nil
+    }
+
     func submit() async -> CCXProjectSummary? {
         guard !isSubmitting else { return nil }
-        if validationError != nil {
+        guard validate() else {
             return nil
         }
 
@@ -160,6 +176,10 @@ final class CCXProjectRegistrationViewModel {
                           defaultValue: "CCX controller CLI is not available. Check the CCX installation, then try again.")
         }
         if case CCXControllerCLIError.processFailed = error {
+            return String(localized: "ccx.projectRegistration.error.registerFailed",
+                          defaultValue: "Could not register the project. Check the selected repository and task source, then try again.")
+        }
+        if case CCXControllerCLIError.timedOut = error {
             return String(localized: "ccx.projectRegistration.error.registerFailed",
                           defaultValue: "Could not register the project. Check the selected repository and task source, then try again.")
         }
