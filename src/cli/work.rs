@@ -45,7 +45,6 @@ pub fn create(args: CreateArgs) -> Result<(), CcxError> {
     let execution_dir = project_dir.join("work-executions").join(&we_id);
     let task_file = execution_dir.join("task.md");
     let source_hash = hash_file(&args.source_path)?;
-    std::fs::create_dir_all(&execution_dir)?;
     let now = chrono::Utc::now().to_rfc3339();
     let task_md = render_task_md(&TaskMdInput {
         project_id: &args.project_id,
@@ -57,7 +56,18 @@ pub fn create(args: CreateArgs) -> Result<(), CcxError> {
         branch: &branch,
         updated_at: &now,
     })?;
-    std::fs::write(task_file.as_std_path(), task_md)?;
+    std::fs::create_dir_all(&execution_dir)?;
+    if test_fail_after_execution_dir() {
+        let error = CcxError::Other(anyhow::anyhow!(
+            "simulated work create failure after execution dir"
+        ));
+        cleanup_create_artifacts(&config.canonical_repo, &worktree, &branch, &execution_dir);
+        return Err(error);
+    }
+    if let Err(error) = std::fs::write(task_file.as_std_path(), task_md) {
+        cleanup_create_artifacts(&config.canonical_repo, &worktree, &branch, &execution_dir);
+        return Err(error.into());
+    }
     if let Err(error) = create_worktree(&config.canonical_repo, &worktree, &branch, &task_file) {
         cleanup_create_artifacts(&config.canonical_repo, &worktree, &branch, &execution_dir);
         return Err(error);
@@ -266,6 +276,17 @@ fn cleanup_create_artifacts(
         .current_dir(repo)
         .output();
     let _ = std::fs::remove_dir_all(execution_dir);
+}
+
+fn test_fail_after_execution_dir() -> bool {
+    #[cfg(debug_assertions)]
+    {
+        std::env::var("CCX_TEST_FAIL_WORK_CREATE_AFTER_EXECUTION_DIR").is_ok()
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        false
+    }
 }
 
 // ---------------------------------------------------------------------------

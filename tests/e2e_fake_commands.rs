@@ -672,6 +672,82 @@ fn work_create_cleans_artifacts_when_event_batch_rolls_back() {
 }
 
 #[test]
+fn work_create_cleans_execution_dir_when_pre_worktree_setup_fails() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("ccx-home");
+    let repo = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    Command::new("git")
+        .args(["init"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["config", "user.name", "Test User"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    std::fs::write(repo.join("README.md"), "hello\n").unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "initial"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    let tasks = repo.join("tasks.md");
+    std::fs::write(&tasks, "- [ ] Create setup failure test\n").unwrap();
+    let project_id = register_project(&home, &repo, &tasks);
+
+    let (code, _stdout, stderr) = run_ccx(
+        &[
+            "work",
+            "create",
+            "--project-id",
+            &project_id,
+            "--source-path",
+            tasks.to_str().unwrap(),
+            "--selector-type",
+            "checkbox",
+            "--selector-value",
+            "L1:- [ ] Create setup failure test",
+            "--display-text",
+            "Create setup failure test",
+            "--json",
+        ],
+        &[("CCX_TEST_FAIL_WORK_CREATE_AFTER_EXECUTION_DIR", "1")],
+        &home,
+    );
+
+    assert_ne!(
+        code, 0,
+        "work create should fail after injected setup error"
+    );
+    assert!(
+        stderr.contains("simulated work create failure after execution dir"),
+        "stderr should report injected failure: {stderr}"
+    );
+    let project_dir = home.join("projects").join(&project_id);
+    let execution_entries = std::fs::read_dir(project_dir.join("work-executions"))
+        .map(|entries| entries.count())
+        .unwrap_or(0);
+    assert_eq!(
+        execution_entries, 0,
+        "pre-worktree setup failure should clean the empty execution dir"
+    );
+    let events_raw = std::fs::read_to_string(project_dir.join("events.jsonl")).unwrap();
+    assert!(!events_raw.contains("work_execution_created"));
+}
+
+#[test]
 fn fake_gh_review_hook_exit_0_is_accepted() {
     let fake_hook = fixture_bin_dir().join("gh-review-hook");
     let tmp = tempfile::tempdir().unwrap();

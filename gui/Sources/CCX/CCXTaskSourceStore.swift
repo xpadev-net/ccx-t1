@@ -474,7 +474,7 @@ final class CCXTaskSourceStore {
             localized: "ccx.tasks.workCreate.error.attach",
             defaultValue: "WorkExecution was created, but the Worker could not be attached."
         )
-        return "\(prefix) \(Self.workCreateMessage(for: error))"
+        return "\(prefix) \(Self.workCreateRecoveryMessage(for: error))"
     }
 
     private static func workCreatePromptMessage(for error: Error) -> String {
@@ -482,7 +482,21 @@ final class CCXTaskSourceStore {
             localized: "ccx.tasks.workCreate.error.prompt",
             defaultValue: "WorkExecution was created and a Worker was attached, but the prompt could not be sent."
         )
-        return "\(prefix) \(Self.workCreateMessage(for: error))"
+        return "\(prefix) \(Self.workCreateRecoveryMessage(for: error))"
+    }
+
+    private static func workCreateRecoveryMessage(for error: Error) -> String {
+        if let cliError = error as? CCXControllerCLIError {
+            switch cliError {
+            case .executableNotFound, .notExecutable, .launchFailed:
+                return String(localized: "ccx.tasks.editor.error.cliUnavailable",
+                              defaultValue: "CCX controller CLI is not available. Check the CCX installation, then try again.")
+            case .processFailed, .invalidJSON, .timedOut, .cancelled:
+                break
+            }
+        }
+        return String(localized: "ccx.tasks.workCreate.error.recover",
+                      defaultValue: "Retry to continue from the created WorkExecution, or attach and prompt a Worker manually.")
     }
 }
 
