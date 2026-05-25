@@ -52,6 +52,8 @@ Research waived: local targeted discovery already identified the dashboard and p
 - 2026-05-26: Simplified `unreadable` to a payload-free status, updated reused CCX workspace custom titles from the resolved project title, and added a workspace unit test for summary-based retitling. Targeted `build-for-testing` passed; targeted `test` hit the existing host-app bootstrap failure before XCTest connection.
 - 2026-05-26: Third `gh-review-hook` pass reported orphaned workspace cleanup on CCX dashboard surface creation failure, unnecessary UUID sorting during project panel lookup, and full-file reads for readability checks.
 - 2026-05-26: Added cleanup via `closeWorkspace` on surface creation failure, removed the panel-key sort, and replaced full-file reads with `FileManager.isReadableFile(atPath:)`.
+- 2026-05-26: Fourth `gh-review-hook` pass reported Reveal in Finder selecting parent folders for existing invalid task-source paths and requested splitting `CCXTaskSourceFileStatus` out of `CCXDashboardView.swift`.
+- 2026-05-26: Added an `existsOnDisk` reveal predicate, moved `CCXTaskSourceFileStatus` to its own Swift file, and registered the new file in the Xcode project.
 
 ## Decision Log
 
