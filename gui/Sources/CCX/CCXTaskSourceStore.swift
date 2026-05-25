@@ -113,7 +113,6 @@ final class CCXTaskSourceStore {
         draftContent = snapshot.content
         conflictMessage = nil
         errorMessage = nil
-        sourceChangeMessage = nil
     }
 
     func clearComposerStatusMessage() {

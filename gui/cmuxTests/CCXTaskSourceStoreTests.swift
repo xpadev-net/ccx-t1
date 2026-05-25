@@ -457,6 +457,31 @@ final class CCXTaskSourceStoreTests: XCTestCase {
         XCTAssertNotNil(store.sourceChangeMessage)
     }
 
+    func testDiscardKeepsSourceChangeMessageUntilReload() async {
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, _, _ in
+                .success(Self.result(stdout: """
+                {
+                  "project_id": "p_123",
+                  "path": "/repo/z/tasks.md",
+                  "content": "loaded",
+                  "hash": "hash-1",
+                  "mtime": "2026-05-26T00:00:00Z",
+                  "warning": null
+                }
+                """))
+            })
+        }
+
+        await store.load()
+        store.draftContent = "local draft"
+        await store.handleTaskSourceChanged(newHash: "hash-2")
+        store.discardChanges()
+
+        XCTAssertFalse(store.isDirty)
+        XCTAssertNotNil(store.sourceChangeMessage)
+    }
+
     func testSourceChangeIgnoresAlreadyLoadedHash() async {
         var invocations = 0
         let store = CCXTaskSourceStore(projectId: "p_123") {
