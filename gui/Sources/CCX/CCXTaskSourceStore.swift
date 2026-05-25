@@ -20,7 +20,7 @@ final class CCXTaskSourceStore {
     private(set) var workCreateStatusMessage: String?
     private(set) var isCreatingWork = false
     private var pendingSourceChangeHash: String?
-    private var pendingWorkCreateCandidateId: String?
+    private var pendingWorkCreateSelectorValue: String?
     private var pendingWorkCreateResult: CCXWorkCreateResult?
     private var pendingWorkerSessionId: String?
     private(set) var lastCreatedWorkExecutionId: String?
@@ -62,7 +62,10 @@ final class CCXTaskSourceStore {
     }
 
     var selectedWorkItemCandidate: CCXTaskSourceWorkItemCandidate? {
-        let candidates = workItemCandidates
+        selectedWorkItemCandidate(in: workItemCandidates)
+    }
+
+    func selectedWorkItemCandidate(in candidates: [CCXTaskSourceWorkItemCandidate]) -> CCXTaskSourceWorkItemCandidate? {
         if let selectedWorkItemCandidateId,
            let selected = candidates.first(where: { $0.id == selectedWorkItemCandidateId }) {
             return selected
@@ -71,8 +74,12 @@ final class CCXTaskSourceStore {
     }
 
     var canCreateWorkExecution: Bool {
+        canCreateWorkExecution(selectedCandidate: selectedWorkItemCandidate)
+    }
+
+    func canCreateWorkExecution(selectedCandidate: CCXTaskSourceWorkItemCandidate?) -> Bool {
         snapshot != nil
-            && selectedWorkItemCandidate != nil
+            && selectedCandidate != nil
             && !isDirty
             && !isLoading
             && !isSaving
@@ -174,7 +181,7 @@ final class CCXTaskSourceStore {
         do {
             let cli = try cli()
             let created: CCXWorkCreateResult
-            if pendingWorkCreateCandidateId == candidate.id, let pendingWorkCreateResult {
+            if pendingWorkCreateSelectorValue == candidate.selectorValue, let pendingWorkCreateResult {
                 created = pendingWorkCreateResult
             } else {
                 created = try await cli.createWork(
@@ -184,7 +191,7 @@ final class CCXTaskSourceStore {
                     selectorValue: candidate.selectorValue,
                     displayText: candidate.displayText
                 )
-                pendingWorkCreateCandidateId = candidate.id
+                pendingWorkCreateSelectorValue = candidate.selectorValue
                 pendingWorkCreateResult = created
                 pendingWorkerSessionId = nil
                 lastCreatedWorkExecutionId = created.workExecutionId
@@ -221,7 +228,7 @@ final class CCXTaskSourceStore {
                 return
             }
 
-            pendingWorkCreateCandidateId = nil
+            pendingWorkCreateSelectorValue = nil
             pendingWorkCreateResult = nil
             pendingWorkerSessionId = nil
             workCreateStatusMessage = String(

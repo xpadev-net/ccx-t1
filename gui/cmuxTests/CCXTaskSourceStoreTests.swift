@@ -795,6 +795,69 @@ final class CCXTaskSourceStoreTests: XCTestCase {
         XCTAssertNil(store.workCreateErrorMessage)
     }
 
+    func testCreateWorkExecutionRetryRecreatesWhenCandidateContentDrifts() async {
+        var calls: [[String]] = []
+        var readAttempts = 0
+        var createAttempts = 0
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, arguments, _ in
+                calls.append(arguments)
+                if arguments.contains("read") {
+                    readAttempts += 1
+                    let content = readAttempts == 1
+                        ? "- [ ] Build create flow\\n"
+                        : "- [ ] Different task at same line\\n"
+                    return .success(Self.result(stdout: """
+                    {
+                      "project_id": "p_123",
+                      "path": "/repo/z/tasks.md",
+                      "content": "\(content)",
+                      "hash": "hash-\(readAttempts)",
+                      "mtime": "2026-05-26T00:00:00Z",
+                      "warning": null
+                    }
+                    """))
+                }
+                if arguments.contains("create") {
+                    createAttempts += 1
+                    return .success(Self.result(stdout: """
+                    {
+                      "work_execution_id": "we_\(createAttempts)",
+                      "branch_name": "ccx/we_\(createAttempts)/build",
+                      "worktree_path": "/worktrees/we_\(createAttempts)",
+                      "task_file_path": "/work-executions/we_\(createAttempts)/task.md"
+                    }
+                    """))
+                }
+                if arguments.contains("attach") {
+                    return .success(CCXControllerCLIProcessResult(
+                        exitCode: 1,
+                        stdout: Data(),
+                        stderr: Data("attach failed".utf8)
+                    ))
+                }
+                return .success(Self.result(stdout: """
+                {
+                  "session_id": "sess_worker",
+                  "status": "sent"
+                }
+                """))
+            })
+        }
+
+        await store.load()
+        await store.createWorkExecutionFromSelection(project: Self.project)
+        await store.load()
+        await store.createWorkExecutionFromSelection(project: Self.project)
+
+        XCTAssertEqual(createAttempts, 2)
+        XCTAssertEqual(store.lastCreatedWorkExecutionId, "we_2")
+        XCTAssertEqual(
+            calls.filter { Array($0.prefix(2)) == ["work", "create"] }.count,
+            2
+        )
+    }
+
     private static func cli(
         _ handler: @escaping (
             URL,
