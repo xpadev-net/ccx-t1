@@ -46,6 +46,8 @@ Research waived: local targeted discovery already identified the dashboard and p
 - 2026-05-26: Corrected validation passed: `rtk git diff --check`, `rtk bash gui/scripts/lint-pbxproj-test-wiring.sh --repo-root gui`, `CMUX_SKIP_ZIG_BUILD=1 rtk bash gui/scripts/test-unit.sh build-for-testing -only-testing:cmuxTests/CCXProjectPickerTests`.
 - 2026-05-26: Corrected XCTest execution attempted with `CMUX_SKIP_ZIG_BUILD=1 rtk bash gui/scripts/test-unit.sh test -only-testing:cmuxTests/CCXProjectPickerTests` and a single test selector; both reached the host app but failed before XCTest connection with `Early unexpected exit ... Test crashed with signal term before establishing connection`.
 - 2026-05-26: Reviewer re-review returned `APPROVED`; residual XCTest runtime failure recorded as host-app/bootstrap environment risk.
+- 2026-05-26: `gh-review-hook` reported missing `xcstrings` keys, synchronous file I/O in the SwiftUI render path, raw unreadable error exposure, an unnecessary `@ObservedObject`, and markdownlint spacing in `docs/coding-agent/lessons.md`.
+- 2026-05-26: Fixed hook findings by adding localized strings, moving task-source status checks behind `.task(id:)` plus detached utility work, logging raw unreadable errors while showing a sanitized UI message, passing a project snapshot into `CCXTasksView`, and correcting markdown heading spacing.
 
 ## Decision Log
 

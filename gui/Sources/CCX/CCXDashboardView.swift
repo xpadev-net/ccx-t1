@@ -1,5 +1,11 @@
 import AppKit
+import os
 import SwiftUI
+
+private let ccxTaskSourceLogger = Logger(
+    subsystem: "com.cmuxterm.ccx",
+    category: "CCXTaskSource"
+)
 
 /// Top-level CCX dashboard. Hosts the project's overview, work executions,
 /// review/PR state, and artifacts in a tabbed layout. The dashboard reads
@@ -62,7 +68,7 @@ public struct CCXDashboardView: View {
                 case .reviews:
                     CCXReviewsView(store: store)
                 case .tasks:
-                    CCXTasksView(store: store)
+                    CCXTasksView(project: store.project)
                 case .artifacts:
                     CCXArtifactsView(store: store)
                 }
@@ -155,16 +161,16 @@ private struct CCXProjectSwitchMenu: View {
 }
 
 public struct CCXTasksView: View {
-    @ObservedObject var store: CCXProjectStore
+    let project: CCXProjectSummary?
 
-    public init(store: CCXProjectStore) {
-        self.store = store
+    public init(project: CCXProjectSummary?) {
+        self.project = project
     }
 
     public var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                if let project = store.project {
+                if let project {
                     CCXTaskSourcePanel(project: project)
                 } else {
                     placeholderView(String(localized: "ccx.tasks.loading",
@@ -183,7 +189,7 @@ private struct CCXTaskSourcePanel: View {
 
     init(project: CCXProjectSummary) {
         self.project = project
-        self._status = State(initialValue: CCXTaskSourceFileStatus(path: project.taskSourceFile))
+        self._status = State(initialValue: CCXTaskSourceFileStatus.checking(path: project.taskSourceFile))
     }
 
     var body: some View {
@@ -246,8 +252,8 @@ private struct CCXTaskSourcePanel: View {
         }
         .padding(12)
         .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
-        .onChange(of: project.taskSourceFile) { _, newPath in
-            status = CCXTaskSourceFileStatus(path: newPath)
+        .task(id: project.taskSourceFile) {
+            await refreshStatus(for: project.taskSourceFile)
         }
     }
 
@@ -283,10 +289,20 @@ private struct CCXTaskSourcePanel: View {
         pasteboard.clearContents()
         pasteboard.setString(status.path, forType: .string)
     }
+
+    private func refreshStatus(for path: String) async {
+        status = CCXTaskSourceFileStatus.checking(path: path)
+        let nextStatus = await Task.detached(priority: .utility) {
+            CCXTaskSourceFileStatus(path: path)
+        }.value
+        guard !Task.isCancelled else { return }
+        status = nextStatus
+    }
 }
 
-struct CCXTaskSourceFileStatus: Equatable {
-    enum Kind: Equatable {
+struct CCXTaskSourceFileStatus: Equatable, Sendable {
+    enum Kind: Equatable, Sendable {
+        case checking
         case missingPath
         case missingFile
         case directory
@@ -299,6 +315,17 @@ struct CCXTaskSourceFileStatus: Equatable {
     let kind: Kind
     let checkedAt: Date
     let modifiedAt: Date?
+
+    private init(path: String, kind: Kind, checkedAt: Date, modifiedAt: Date?) {
+        self.path = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.kind = kind
+        self.checkedAt = checkedAt
+        self.modifiedAt = modifiedAt
+    }
+
+    static func checking(path: String, checkedAt: Date = Date()) -> CCXTaskSourceFileStatus {
+        CCXTaskSourceFileStatus(path: path, kind: .checking, checkedAt: checkedAt, modifiedAt: nil)
+    }
 
     init(
         path: String,
@@ -341,6 +368,9 @@ struct CCXTaskSourceFileStatus: Equatable {
             self.kind = .ready
             self.modifiedAt = attributes[.modificationDate] as? Date
         } catch {
+            ccxTaskSourceLogger.warning(
+                "Could not read task source file at \(trimmedPath, privacy: .private): \(error.localizedDescription, privacy: .public)"
+            )
             self.kind = .unreadable(error.localizedDescription)
             self.modifiedAt = nil
         }
@@ -372,6 +402,8 @@ struct CCXTaskSourceFileStatus: Equatable {
 
     var badgeLabel: String {
         switch kind {
+        case .checking:
+            return String(localized: "ccx.tasks.status.checking", defaultValue: "Checking")
         case .ready:
             return String(localized: "ccx.tasks.status.ready", defaultValue: "Ready")
         case .missingPath:
@@ -385,7 +417,7 @@ struct CCXTaskSourceFileStatus: Equatable {
         switch kind {
         case .ready:
             return .green
-        case .missingPath:
+        case .checking, .missingPath:
             return .secondary
         default:
             return .orange
@@ -394,6 +426,9 @@ struct CCXTaskSourceFileStatus: Equatable {
 
     var message: String? {
         switch kind {
+        case .checking:
+            return String(localized: "ccx.tasks.message.checking",
+                          defaultValue: "Checking the registered task source file.")
         case .ready:
             return String(localized: "ccx.tasks.message.ready",
                           defaultValue: "The registered Markdown task source is available.")
@@ -409,9 +444,9 @@ struct CCXTaskSourceFileStatus: Equatable {
         case .notMarkdown:
             return String(localized: "ccx.tasks.message.notMarkdown",
                           defaultValue: "The configured task source file is not a Markdown file.")
-        case let .unreadable(error):
+        case .unreadable:
             return String(localized: "ccx.tasks.message.unreadable",
-                          defaultValue: "The task source file could not be read: \(error)")
+                          defaultValue: "The task source file could not be read. Check file permissions and try again.")
         }
     }
 }
