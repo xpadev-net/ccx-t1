@@ -268,6 +268,8 @@
 		CCC00000000000000000B005 /* CCXSidebarPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F005 /* CCXSidebarPanel.swift */; };
 		CCC00000000000000000B006 /* CCXDashboardPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F006 /* CCXDashboardPanel.swift */; };
 		CCC00000000000000000B007 /* CCXAppDelegateBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F007 /* CCXAppDelegateBridge.swift */; };
+		CCC00000000000000000B008 /* CCXControllerCLI.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F008 /* CCXControllerCLI.swift */; };
+		CCC00000000000000000B108 /* CCXControllerCLITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F108 /* CCXControllerCLITests.swift */; };
 		A50012F3 /* KeyboardShortcutSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50012F2 /* KeyboardShortcutSettings.swift */; };
 		C0DE7B100000000000000001 /* TextBoxInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE7B100000000000000002 /* TextBoxInput.swift */; };
 		C1713004C1713004C1713004 /* KeyboardShortcutSettingsLookup.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1713003C1713003C1713003 /* KeyboardShortcutSettingsLookup.swift */; };
@@ -845,6 +847,8 @@
 		CCC00000000000000000F005 /* CCXSidebarPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXSidebarPanel.swift; sourceTree = "<group>"; };
 		CCC00000000000000000F006 /* CCXDashboardPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXDashboardPanel.swift; sourceTree = "<group>"; };
 		CCC00000000000000000F007 /* CCXAppDelegateBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXAppDelegateBridge.swift; sourceTree = "<group>"; };
+		CCC00000000000000000F008 /* CCXControllerCLI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXControllerCLI.swift; sourceTree = "<group>"; };
+		CCC00000000000000000F108 /* CCXControllerCLITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXControllerCLITests.swift; sourceTree = "<group>"; };
 		A50012F2 /* KeyboardShortcutSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardShortcutSettings.swift; sourceTree = "<group>"; };
 		C0DE7B100000000000000002 /* TextBoxInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextBoxInput.swift; sourceTree = "<group>"; };
 		C1713003C1713003C1713003 /* KeyboardShortcutSettingsLookup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardShortcutSettingsLookup.swift; sourceTree = "<group>"; };
@@ -1176,6 +1180,7 @@
 				CCC00000000000000000F005 /* CCXSidebarPanel.swift */,
 				CCC00000000000000000F006 /* CCXDashboardPanel.swift */,
 				CCC00000000000000000F007 /* CCXAppDelegateBridge.swift */,
+				CCC00000000000000000F008 /* CCXControllerCLI.swift */,
 			);
 			name = CCX;
 			path = CCX;
@@ -1706,6 +1711,7 @@
 					A5D4120CA1B2C3D4E5F60718 /* CLILegacyHookAliasTests.swift */,
 					A5D4120EA1B2C3D4E5F60718 /* CLIAuthAliasTests.swift */,
 					C0DE35530000000000000102 /* BundledCLILinkageTests.swift */,
+					CCC00000000000000000F108 /* CCXControllerCLITests.swift */,
 					C37800000000000000000002 /* VMSSHCommandTests.swift */,
 					A5E01204A1B2C3D4E5F60718 /* OpenCodeHookRegressionTests.swift */,
 				10D684CFFB8CDEF89CE2D9E1 /* TabManagerSessionSnapshotTests.swift */,
@@ -2083,6 +2089,7 @@
 					CCC00000000000000000B005 /* CCXSidebarPanel.swift in Sources */,
 				CCC00000000000000000B006 /* CCXDashboardPanel.swift in Sources */,
 				CCC00000000000000000B007 /* CCXAppDelegateBridge.swift in Sources */,
+				CCC00000000000000000B008 /* CCXControllerCLI.swift in Sources */,
 					A50012F3 /* KeyboardShortcutSettings.swift in Sources */,
 				C0DE7B100000000000000001 /* TextBoxInput.swift in Sources */,
 					C1713004C1713004C1713004 /* KeyboardShortcutSettingsLookup.swift in Sources */,
@@ -2509,6 +2516,7 @@
 					A5D4120BA1B2C3D4E5F60718 /* CLILegacyHookAliasTests.swift in Sources */,
 					A5D4120DA1B2C3D4E5F60718 /* CLIAuthAliasTests.swift in Sources */,
 					C0DE35530000000000000101 /* BundledCLILinkageTests.swift in Sources */,
+					CCC00000000000000000B108 /* CCXControllerCLITests.swift in Sources */,
 					C37800000000000000000001 /* VMSSHCommandTests.swift in Sources */,
 					A5E01203A1B2C3D4E5F60718 /* OpenCodeHookRegressionTests.swift in Sources */,
 				2BB56A710BB1FC50367E5BCF /* TabManagerSessionSnapshotTests.swift in Sources */,
