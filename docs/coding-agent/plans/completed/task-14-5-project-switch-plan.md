@@ -27,6 +27,8 @@ Implement project switching for the CCX dashboard by adding `Workspace.switchToC
 - 2026-05-25: Added unit coverage for replacing an existing dashboard panel and opening a dashboard when none exists.
 - 2026-05-25: Marked `z/tasks.md` 14.5 complete.
 - 2026-05-25: Validation passed: `git diff --check`; JSON parse for `gui/Resources/Localizable.xcstrings`; `rtk plutil -lint gui/cmux.xcodeproj/project.pbxproj`; `rtk bash gui/scripts/lint-pbxproj-test-wiring.sh --repo-root gui`. Targeted `xcodebuild` for `WorkspaceCCXDashboardSwitchTests` and `CCXProjectPickerTests` compiled touched Swift/test files and stopped before test execution on the existing missing `gui/ghostty` checkout dependency. Subagent review approved the lifecycle, tab reuse, fallback, and test coverage.
+- 2026-05-25: `gh-review-hook` requested removing non-deterministic `Dictionary.first` fallback selection when multiple CCX dashboards exist. Replaced it with pane/tab-order traversal.
+- 2026-05-25: Hook-fix validation passed: `git diff --check`; JSON parse for `gui/Resources/Localizable.xcstrings`; `rtk plutil -lint gui/cmux.xcodeproj/project.pbxproj`; `rtk bash gui/scripts/lint-pbxproj-test-wiring.sh --repo-root gui`. Subagent review approved the deterministic dashboard fallback selection.
 
 ## Notes
 

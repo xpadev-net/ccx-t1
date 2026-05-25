@@ -13332,7 +13332,15 @@ final class Workspace: Identifiable, ObservableObject {
                 }
             }
         }
-        return panels.first { _, panel in panel is CCXDashboardPanel }?.key
+        for paneId in bonsplitController.allPaneIds {
+            for tab in bonsplitController.tabs(inPane: paneId) {
+                if let panelId = panelIdFromSurfaceId(tab.id),
+                   panels[panelId] is CCXDashboardPanel {
+                    return panelId
+                }
+            }
+        }
+        return nil
     }
 
     @discardableResult
