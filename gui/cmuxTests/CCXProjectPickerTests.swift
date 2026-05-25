@@ -219,6 +219,53 @@ final class CCXProjectPickerTests: XCTestCase {
         XCTAssertEqual(form.trimmedTaskSourceFilePath, taskSource.path)
     }
 
+    func testTaskSourceStatusAcceptsMarkdownFile() throws {
+        let file = try makeFile(named: "tasks.md", content: "# Tasks\n")
+        let checkedAt = Date(timeIntervalSince1970: 1_800_000_000)
+
+        let status = CCXTaskSourceFileStatus(path: " \(file.path) ", checkedAt: checkedAt)
+
+        XCTAssertEqual(status.kind, .ready)
+        XCTAssertEqual(status.path, file.path)
+        XCTAssertTrue(status.canOpen)
+        XCTAssertTrue(status.hasPath)
+        XCTAssertEqual(status.checkedAt, checkedAt)
+        XCTAssertNotNil(status.modifiedAt)
+    }
+
+    func testTaskSourceStatusAcceptsMarkdownExtension() throws {
+        let file = try makeFile(named: "tasks.markdown", content: "# Tasks\n")
+
+        XCTAssertEqual(CCXTaskSourceFileStatus(path: file.path).kind, .ready)
+    }
+
+    func testTaskSourceStatusReportsMissingPath() {
+        let status = CCXTaskSourceFileStatus(path: "  ")
+
+        XCTAssertEqual(status.kind, .missingPath)
+        XCTAssertEqual(status.displayPath, "Not configured")
+        XCTAssertFalse(status.canOpen)
+        XCTAssertFalse(status.hasPath)
+    }
+
+    func testTaskSourceStatusReportsMissingFile() throws {
+        let file = try temporaryDirectory().appendingPathComponent("missing.md")
+
+        let status = CCXTaskSourceFileStatus(path: file.path)
+
+        XCTAssertEqual(status.kind, .missingFile)
+        XCTAssertFalse(status.canOpen)
+        XCTAssertTrue(status.hasPath)
+    }
+
+    func testTaskSourceStatusRejectsDirectoryAndNonMarkdownFile() throws {
+        let directory = try temporaryDirectory()
+        let textFile = try makeFile(named: "tasks.txt", in: directory, content: "Tasks\n")
+
+        XCTAssertEqual(CCXTaskSourceFileStatus(path: directory.path).kind, .directory)
+        XCTAssertEqual(CCXTaskSourceFileStatus(path: textFile.path).kind, .notMarkdown)
+    }
+
     @MainActor
     func testRegistrationViewModelCachesValidationUntilExplicitValidate() throws {
         let repo = try temporaryDirectory()
@@ -704,9 +751,14 @@ final class CCXProjectPickerTests: XCTestCase {
         return dir
     }
 
-    private func makeFile(named name: String, in directory: URL) throws -> URL {
+    private func makeFile(
+        named name: String,
+        in directory: URL? = nil,
+        content: String = "# Task\n"
+    ) throws -> URL {
+        let directory = try directory ?? temporaryDirectory()
         let file = directory.appendingPathComponent(name)
-        try Data("# Task\n".utf8).write(to: file)
+        try Data(content.utf8).write(to: file)
         return file
     }
 }

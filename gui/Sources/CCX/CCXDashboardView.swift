@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Top-level CCX dashboard. Hosts the project's overview, work executions,
@@ -10,7 +11,7 @@ public struct CCXDashboardView: View {
     @State private var selection: Tab = .overview
 
     public enum Tab: String, CaseIterable, Identifiable {
-        case overview, workExecutions, reviews, artifacts
+        case overview, workExecutions, reviews, tasks, artifacts
         public var id: String { rawValue }
 
         var label: String {
@@ -21,6 +22,8 @@ public struct CCXDashboardView: View {
                 return String(localized: "ccx.dashboard.tab.workExecutions", defaultValue: "Work executions")
             case .reviews:
                 return String(localized: "ccx.dashboard.tab.reviews", defaultValue: "Reviews")
+            case .tasks:
+                return String(localized: "ccx.dashboard.tab.tasks", defaultValue: "Tasks")
             case .artifacts:
                 return String(localized: "ccx.dashboard.tab.artifacts", defaultValue: "Artifacts")
             }
@@ -58,6 +61,8 @@ public struct CCXDashboardView: View {
                     CCXWorkExecutionsView(store: store)
                 case .reviews:
                     CCXReviewsView(store: store)
+                case .tasks:
+                    CCXTasksView(project: store.project)
                 case .artifacts:
                     CCXArtifactsView(store: store)
                 }

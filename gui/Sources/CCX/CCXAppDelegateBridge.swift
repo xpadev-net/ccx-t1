@@ -62,6 +62,16 @@ extension AppDelegate {
             setActiveMainWindow(window)
         }
 
+        if let projectId {
+#if DEBUG
+            cmuxDebugLog("ccx.dashboardOpen source=\(debugSource) projectId=\(projectId)")
+#endif
+            return context.tabManager.openCCXProjectWorkspace(
+                projectId: projectId,
+                origin: debugSource
+            ) != nil
+        }
+
         let workspace = context.tabManager.selectedWorkspace
             ?? context.tabManager.addWorkspace(workingDirectory: nil, select: true)
         guard let paneId = workspace.bonsplitController.focusedPaneId
