@@ -900,6 +900,74 @@ final class CCXTaskSourceStoreTests: XCTestCase {
         )
     }
 
+    func testCreateWorkExecutionSelectionChangeRetainsPreviousPartialId() async {
+        var createAttempts = 0
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, arguments, _ in
+                if arguments.contains("read") {
+                    return .success(Self.result(stdout: """
+                    {
+                      "project_id": "p_123",
+                      "path": "/repo/z/tasks.md",
+                      "content": "- [ ] First task\\n- [ ] Second task\\n",
+                      "hash": "hash-1",
+                      "mtime": "2026-05-26T00:00:00Z",
+                      "warning": null
+                    }
+                    """))
+                }
+                if arguments.contains("create") {
+                    createAttempts += 1
+                    return .success(Self.result(stdout: """
+                    {
+                      "work_execution_id": "we_\(createAttempts)",
+                      "branch_name": "ccx/we_\(createAttempts)/build",
+                      "worktree_path": "/worktrees/we_\(createAttempts)",
+                      "task_file_path": "/work-executions/we_\(createAttempts)/task.md"
+                    }
+                    """))
+                }
+                if arguments.contains("attach") {
+                    if createAttempts == 1 {
+                        return .success(CCXControllerCLIProcessResult(
+                            exitCode: 1,
+                            stdout: Data(),
+                            stderr: Data("attach failed".utf8)
+                        ))
+                    }
+                    return .success(Self.result(stdout: """
+                    {
+                      "agent_session_id": "sess_worker",
+                      "work_execution_id": "we_2",
+                      "role": "worker",
+                      "mode": "writer",
+                      "status": "attached"
+                    }
+                    """))
+                }
+                return .success(Self.result(stdout: """
+                {
+                  "session_id": "sess_worker",
+                  "status": "sent"
+                }
+                """))
+            })
+        }
+
+        await store.load()
+        store.selectedWorkItemCandidateId = store.workItemCandidates[0].id
+        await store.createWorkExecutionFromSelection(project: Self.project)
+        XCTAssertTrue(store.workCreateStatusMessage?.contains("we_1") ?? false)
+
+        store.selectedWorkItemCandidateId = store.workItemCandidates[1].id
+        await store.createWorkExecutionFromSelection(project: Self.project)
+
+        XCTAssertEqual(createAttempts, 2)
+        XCTAssertEqual(store.lastCreatedWorkExecutionId, "we_2")
+        XCTAssertTrue(store.workCreateStatusMessage?.contains("we_1") ?? false)
+        XCTAssertNil(store.workCreateErrorMessage)
+    }
+
     private static func cli(
         _ handler: @escaping (
             URL,

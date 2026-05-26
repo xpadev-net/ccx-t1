@@ -7,7 +7,11 @@ final class CCXTaskSourceStore {
     typealias CLIProvider = () -> Result<CCXControllerCLI, CCXControllerCLIError>
 
     private(set) var snapshot: CCXTaskSourceSnapshot?
-    var draftContent = ""
+    var draftContent = "" {
+        didSet {
+            scheduleWorkItemCandidateParse(for: draftContent)
+        }
+    }
     private(set) var isLoading = false
     private(set) var isSaving = false
     private(set) var isComposing = false
@@ -18,11 +22,13 @@ final class CCXTaskSourceStore {
     private(set) var sourceChangeMessage: String?
     private(set) var workCreateErrorMessage: String?
     private(set) var workCreateStatusMessage: String?
+    private(set) var workItemCandidates: [CCXTaskSourceWorkItemCandidate] = []
     private(set) var isCreatingWork = false
     private var pendingSourceChangeHash: String?
     private var pendingWorkCreateSelectorValue: String?
     private var pendingWorkCreateResult: CCXWorkCreateResult?
     private var pendingWorkerSessionId: String?
+    private var retainedPartialWorkCreateStatusMessages: [String] = []
     private(set) var lastCreatedWorkExecutionId: String?
     var composerInput = ""
     var selectedWorkItemCandidateId: String?
@@ -35,6 +41,8 @@ final class CCXTaskSourceStore {
     private let projectId: String
     @ObservationIgnored
     private let cliProvider: CLIProvider
+    @ObservationIgnored
+    private var workItemCandidatesParseTask: Task<Void, Never>?
 
     init(
         projectId: String,
@@ -55,10 +63,6 @@ final class CCXTaskSourceStore {
 
     var canSubmitComposer: Bool {
         !composerInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isComposing
-    }
-
-    var workItemCandidates: [CCXTaskSourceWorkItemCandidate] {
-        Self.workItemCandidates(in: draftContent)
     }
 
     var selectedWorkItemCandidate: CCXTaskSourceWorkItemCandidate? {
@@ -174,8 +178,9 @@ final class CCXTaskSourceStore {
     func createWorkExecutionFromSelection(project: CCXProjectSummary) async {
         guard canCreateWorkExecution, let candidate = selectedWorkItemCandidate else { return }
         isCreatingWork = true
+        retainPendingWorkCreateStatusIfChangingSelection(to: candidate)
         workCreateErrorMessage = nil
-        workCreateStatusMessage = nil
+        workCreateStatusMessage = combinedWorkCreateStatus(current: nil)
         defer { isCreatingWork = false }
 
         do {
@@ -211,7 +216,7 @@ final class CCXTaskSourceStore {
                     sessionId = attached.agentSessionId
                     pendingWorkerSessionId = sessionId
                 } catch {
-                    workCreateStatusMessage = Self.workCreatePartialStatus(created: created)
+                    workCreateStatusMessage = combinedWorkCreateStatus(current: Self.workCreatePartialStatus(created: created))
                     workCreateErrorMessage = Self.workCreateAttachMessage(for: error)
                     return
                 }
@@ -223,7 +228,7 @@ final class CCXTaskSourceStore {
                     message: Self.workerPrompt(created: created, candidate: candidate)
                 )
             } catch {
-                workCreateStatusMessage = Self.workCreatePartialStatus(created: created)
+                workCreateStatusMessage = combinedWorkCreateStatus(current: Self.workCreatePartialStatus(created: created))
                 workCreateErrorMessage = Self.workCreatePromptMessage(for: error)
                 return
             }
@@ -231,10 +236,10 @@ final class CCXTaskSourceStore {
             pendingWorkCreateSelectorValue = nil
             pendingWorkCreateResult = nil
             pendingWorkerSessionId = nil
-            workCreateStatusMessage = String(
+            workCreateStatusMessage = combinedWorkCreateStatus(current: String(
                 localized: "ccx.tasks.workCreate.sent",
                 defaultValue: "Created WorkExecution and prompted a Worker."
-            )
+            ))
         } catch {
             workCreateErrorMessage = Self.workCreateMessage(for: error)
         }
@@ -261,7 +266,7 @@ final class CCXTaskSourceStore {
                 mtime: result.mtime,
                 warning: result.warning
             )
-            clearMissingWorkItemSelection()
+            updateWorkItemCandidates(Self.workItemCandidates(in: draftContent), for: draftContent)
             sourceChangeMessage = nil
         } catch {
             if Self.isConflict(error) {
@@ -378,15 +383,53 @@ final class CCXTaskSourceStore {
     private func apply(snapshot: CCXTaskSourceSnapshot) {
         self.snapshot = snapshot
         self.draftContent = snapshot.content
-        clearMissingWorkItemSelection()
+        updateWorkItemCandidates(Self.workItemCandidates(in: snapshot.content), for: snapshot.content)
     }
 
-    private func clearMissingWorkItemSelection() {
+    private func scheduleWorkItemCandidateParse(for markdown: String) {
+        workItemCandidatesParseTask?.cancel()
+        workItemCandidatesParseTask = Task { [weak self, markdown] in
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard !Task.isCancelled else { return }
+            let candidates = await Task.detached(priority: .userInitiated) {
+                CCXWorkItemCandidateParser.parse(markdown)
+            }.value
+            guard !Task.isCancelled else { return }
+            self?.updateWorkItemCandidates(candidates, for: markdown)
+        }
+    }
+
+    private func updateWorkItemCandidates(_ candidates: [CCXTaskSourceWorkItemCandidate], for markdown: String) {
+        workItemCandidatesParseTask?.cancel()
+        guard draftContent == markdown else { return }
+        workItemCandidates = candidates
+        clearMissingWorkItemSelection(in: candidates)
+    }
+
+    private func clearMissingWorkItemSelection(in candidates: [CCXTaskSourceWorkItemCandidate]) {
         guard let selectedWorkItemCandidateId else { return }
-        let candidateIds = Set(Self.workItemCandidates(in: draftContent).map(\.id))
+        let candidateIds = Set(candidates.map(\.id))
         if !candidateIds.contains(selectedWorkItemCandidateId) {
             self.selectedWorkItemCandidateId = nil
         }
+    }
+
+    private func retainPendingWorkCreateStatusIfChangingSelection(to candidate: CCXTaskSourceWorkItemCandidate) {
+        guard pendingWorkCreateSelectorValue != candidate.selectorValue,
+              let pendingResult = pendingWorkCreateResult else { return }
+        let status = Self.workCreatePartialStatus(created: pendingResult)
+        if !retainedPartialWorkCreateStatusMessages.contains(status) {
+            retainedPartialWorkCreateStatusMessages.append(status)
+        }
+        pendingWorkCreateSelectorValue = nil
+        pendingWorkCreateResult = nil
+        pendingWorkerSessionId = nil
+    }
+
+    private func combinedWorkCreateStatus(current: String?) -> String? {
+        let messages = retainedPartialWorkCreateStatusMessages + [current].compactMap { $0 }
+        guard !messages.isEmpty else { return nil }
+        return messages.joined(separator: "\n")
     }
 
     private func cli() throws -> CCXControllerCLI {
