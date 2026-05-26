@@ -42,7 +42,7 @@ final class CCXTaskSourceStore {
     @ObservationIgnored
     private let cliProvider: CLIProvider
     @ObservationIgnored
-    private var workItemCandidatesParseTimer: DispatchSourceTimer?
+    private var workItemCandidatesParseTask: Task<Void, Never>?
 
     init(
         projectId: String,
@@ -50,6 +50,10 @@ final class CCXTaskSourceStore {
     ) {
         self.projectId = projectId
         self.cliProvider = cliProvider
+    }
+
+    deinit {
+        workItemCandidatesParseTask?.cancel()
     }
 
     var isDirty: Bool {
@@ -388,22 +392,19 @@ final class CCXTaskSourceStore {
     }
 
     private func scheduleWorkItemCandidateParse(for markdown: String) {
-        workItemCandidatesParseTimer?.cancel()
-        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .userInitiated))
-        timer.schedule(deadline: .now() + .milliseconds(150))
-        timer.setEventHandler { [weak self, markdown] in
-            let candidates = CCXWorkItemCandidateParser.parse(markdown)
-            Task { @MainActor [weak self] in
-                self?.updateWorkItemCandidates(candidates, for: markdown)
-            }
+        workItemCandidatesParseTask?.cancel()
+        workItemCandidatesParseTask = Task { [weak self, markdown] in
+            let candidates = await Task.detached(priority: .userInitiated) {
+                CCXWorkItemCandidateParser.parse(markdown)
+            }.value
+            guard !Task.isCancelled else { return }
+            self?.updateWorkItemCandidates(candidates, for: markdown)
         }
-        workItemCandidatesParseTimer = timer
-        timer.resume()
     }
 
     private func updateWorkItemCandidates(_ candidates: [CCXTaskSourceWorkItemCandidate], for markdown: String) {
-        workItemCandidatesParseTimer?.cancel()
-        workItemCandidatesParseTimer = nil
+        workItemCandidatesParseTask?.cancel()
+        workItemCandidatesParseTask = nil
         guard draftContent == markdown else { return }
         workItemCandidates = candidates
         clearMissingWorkItemSelection(in: candidates)
