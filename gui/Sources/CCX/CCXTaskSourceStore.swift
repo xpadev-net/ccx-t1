@@ -403,12 +403,10 @@ final class CCXTaskSourceStore {
     }
 
     private func apply(snapshot: CCXTaskSourceSnapshot) async {
+        guard !Task.isCancelled else { return }
         self.snapshot = snapshot
         _draftContent = snapshot.content
         let parseTask = scheduleWorkItemCandidateParse(for: snapshot.content, prunePendingAttempts: true)
-        guard !Task.isCancelled else {
-            return
-        }
         await withTaskCancellationHandler {
             await parseTask.value
         } onCancel: {

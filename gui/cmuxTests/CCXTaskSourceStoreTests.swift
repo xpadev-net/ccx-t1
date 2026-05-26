@@ -660,8 +660,10 @@ final class CCXTaskSourceStoreTests: XCTestCase {
 
         XCTAssertEqual(candidates.map(\.selectorType), ["heading", "checkbox", "heading"])
         XCTAssertEqual(candidates[0].displayText, "Phase 1")
+        XCTAssertEqual(candidates[0].selectorValue, "L1:# Phase 1")
         XCTAssertEqual(candidates[1].displayText, "Build create flow")
         XCTAssertEqual(candidates[1].selectorValue, "L3:- [ ] Build create flow")
+        XCTAssertEqual(candidates[2].selectorValue, "L5:## Phase 2")
     }
 
     func testWorkItemCandidatesTrimCRLFAndUseTextStableIds() {
@@ -672,6 +674,7 @@ final class CCXTaskSourceStoreTests: XCTestCase {
             "heading-phase 1-1",
             "checkbox-build create flow-1",
         ])
+        XCTAssertEqual(candidates[0].selectorValue, "L1:# Phase 1")
         XCTAssertEqual(candidates[1].selectorValue, "L2:- [ ] Build create flow")
     }
 

@@ -32,7 +32,7 @@ enum CCXWorkItemCandidateParser {
                 candidates.append(CCXTaskSourceWorkItemCandidate(
                     id: stableId(selectorType: "heading", displayText: title, occurrence: occurrence),
                     selectorType: "heading",
-                    selectorValue: "L\(lineNumber):\(title)",
+                    selectorValue: "L\(lineNumber):\(trimmed)",
                     displayText: title
                 ))
                 return
