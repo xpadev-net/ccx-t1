@@ -986,6 +986,74 @@ final class CCXTaskSourceStoreTests: XCTestCase {
         XCTAssertNil(store.workCreateErrorMessage)
     }
 
+    func testCreateWorkExecutionClearsPendingWhenCandidateDisappearsFromSnapshot() async {
+        var readAttempts = 0
+        var createAttempts = 0
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, arguments, _ in
+                if arguments.contains("read") {
+                    readAttempts += 1
+                    let content: String
+                    switch readAttempts {
+                    case 1:
+                        content = "- [ ] Build create flow\\n"
+                    case 2:
+                        content = "# No pending candidate\\n"
+                    default:
+                        content = "- [ ] Build create flow\\n"
+                    }
+                    return .success(Self.result(stdout: """
+                    {
+                      "project_id": "p_123",
+                      "path": "/repo/z/tasks.md",
+                      "content": "\(content)",
+                      "hash": "hash-\(readAttempts)",
+                      "mtime": "2026-05-26T00:00:00Z",
+                      "warning": null
+                    }
+                    """))
+                }
+                if arguments.contains("create") {
+                    createAttempts += 1
+                    return .success(Self.result(stdout: """
+                    {
+                      "work_execution_id": "we_\(createAttempts)",
+                      "branch_name": "ccx/we_\(createAttempts)/build",
+                      "worktree_path": "/worktrees/we_\(createAttempts)",
+                      "task_file_path": "/work-executions/we_\(createAttempts)/task.md"
+                    }
+                    """))
+                }
+                if arguments.contains("attach") {
+                    return .success(CCXControllerCLIProcessResult(
+                        exitCode: 1,
+                        stdout: Data(),
+                        stderr: Data("attach failed".utf8)
+                    ))
+                }
+                return .success(Self.result(stdout: """
+                {
+                  "session_id": "sess_worker",
+                  "status": "sent"
+                }
+                """))
+            })
+        }
+
+        await store.load()
+        let selectedCandidateId = store.workItemCandidates[0].id
+        store.selectedWorkItemCandidateId = selectedCandidateId
+        await store.createWorkExecutionFromSelection(project: Self.project)
+        await store.load()
+        await store.load()
+        store.selectedWorkItemCandidateId = selectedCandidateId
+        await store.createWorkExecutionFromSelection(project: Self.project)
+
+        XCTAssertEqual(createAttempts, 2)
+        XCTAssertEqual(store.lastCreatedWorkExecutionId, "we_2")
+        XCTAssertNotNil(store.workCreateErrorMessage)
+    }
+
     func testCreateWorkExecutionSelectionChangeRetainsPreviousPartialId() async {
         var createAttempts = 0
         var secondAttachAttempts = 0

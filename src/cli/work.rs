@@ -270,7 +270,15 @@ fn cleanup_create_artifacts(
     branch: &str,
     execution_dir: &Utf8Path,
 ) {
-    let _ = remove_worktree(repo, worktree);
+    let worktree_exists = worktree.exists();
+    let worktree_removed = if test_fail_cleanup_remove_worktree() && worktree_exists {
+        false
+    } else {
+        remove_worktree(repo, worktree).is_ok()
+    };
+    if worktree_exists && !worktree_removed {
+        return;
+    }
     let _ = std::process::Command::new("git")
         .args(["branch", "-D", branch])
         .current_dir(repo)
@@ -282,6 +290,17 @@ fn test_fail_after_execution_dir() -> bool {
     #[cfg(debug_assertions)]
     {
         std::env::var("CCX_TEST_FAIL_WORK_CREATE_AFTER_EXECUTION_DIR").is_ok()
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        false
+    }
+}
+
+fn test_fail_cleanup_remove_worktree() -> bool {
+    #[cfg(debug_assertions)]
+    {
+        std::env::var("CCX_TEST_FAIL_WORK_CREATE_CLEANUP_REMOVE_WORKTREE").is_ok()
     }
     #[cfg(not(debug_assertions))]
     {

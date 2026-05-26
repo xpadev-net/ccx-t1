@@ -390,7 +390,9 @@ final class CCXTaskSourceStore {
     private func apply(snapshot: CCXTaskSourceSnapshot) {
         self.snapshot = snapshot
         self.draftContent = snapshot.content
-        updateWorkItemCandidates(Self.workItemCandidates(in: snapshot.content), for: snapshot.content)
+        let candidates = Self.workItemCandidates(in: snapshot.content)
+        discardPendingWorkCreateAttemptsMissing(from: candidates)
+        updateWorkItemCandidates(candidates, for: snapshot.content)
     }
 
     private func scheduleWorkItemCandidateParse(for markdown: String) {
@@ -423,6 +425,11 @@ final class CCXTaskSourceStore {
         if !candidateIds.contains(selectedWorkItemCandidateId) {
             self.selectedWorkItemCandidateId = nil
         }
+    }
+
+    private func discardPendingWorkCreateAttemptsMissing(from candidates: [CCXTaskSourceWorkItemCandidate]) {
+        let candidateIds = Set(candidates.map(\.id))
+        pendingWorkCreateAttempts = pendingWorkCreateAttempts.filter { candidateIds.contains($0.key) }
     }
 
     private func retainPendingWorkCreateStatusIfChangingSelection(to candidate: CCXTaskSourceWorkItemCandidate) {

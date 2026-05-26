@@ -676,6 +676,100 @@ fn work_create_cleans_artifacts_when_event_batch_rolls_back() {
 }
 
 #[test]
+fn work_create_preserves_execution_dir_when_worktree_cleanup_fails() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("ccx-home");
+    let repo = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    Command::new("git")
+        .args(["init"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["config", "user.name", "Test User"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    std::fs::write(repo.join("README.md"), "hello\n").unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "initial"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    let tasks = repo.join("tasks.md");
+    std::fs::write(&tasks, "- [ ] Preserve symlink target\n").unwrap();
+    let project_id = register_project(&home, &repo, &tasks);
+
+    let (code, _stdout, stderr) = run_ccx(
+        &[
+            "work",
+            "create",
+            "--project-id",
+            &project_id,
+            "--source-path",
+            tasks.to_str().unwrap(),
+            "--selector-type",
+            "checkbox",
+            "--selector-value",
+            "L1:- [ ] Preserve symlink target",
+            "--display-text",
+            "Preserve symlink target",
+            "--json",
+        ],
+        &[
+            ("CCX_TEST_FAIL_EVENT_BATCH_AFTER_LINES", "1"),
+            ("CCX_TEST_FAIL_WORK_CREATE_CLEANUP_REMOVE_WORKTREE", "1"),
+        ],
+        &home,
+    );
+
+    assert_ne!(code, 0, "work create should fail after append injection");
+    assert!(
+        stderr.contains("simulated event batch append failure"),
+        "stderr should report injected failure: {stderr}"
+    );
+    let project_dir = home.join("projects").join(&project_id);
+    let execution_dirs: Vec<_> = std::fs::read_dir(project_dir.join("work-executions"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    assert_eq!(
+        execution_dirs.len(),
+        1,
+        "failed worktree cleanup should preserve execution artifacts"
+    );
+    assert!(
+        execution_dirs[0].join("task.md").exists(),
+        "preserved execution dir should keep the worktree symlink target"
+    );
+    let worktree_dirs: Vec<_> = std::fs::read_dir(project_dir.join("worktrees"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    assert_eq!(
+        worktree_dirs.len(),
+        1,
+        "failed worktree cleanup should leave the worktree for manual recovery"
+    );
+    let symlink_target = std::fs::read_link(worktree_dirs[0].join(".ccx-task.md")).unwrap();
+    assert!(
+        symlink_target.exists(),
+        "worktree task symlink should not dangle"
+    );
+}
+
+#[test]
 fn work_create_cleans_execution_dir_when_pre_worktree_setup_fails() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("ccx-home");
