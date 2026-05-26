@@ -212,6 +212,14 @@ private struct CCXTaskSourcePanel: View {
                 .disabled(!sourceStore.canSubmitComposer || sourceStore.isComposing || !status.canOpen)
             }
 
+            let workItemCandidates = sourceStore.workItemCandidates
+            CCXWorkCreateSection(
+                project: project,
+                status: status,
+                sourceStore: sourceStore,
+                candidates: workItemCandidates
+            )
+
             HStack(spacing: 8) {
                 Button {
                     Task { await sourceStore.save() }
@@ -318,6 +326,68 @@ private struct CCXTaskSourcePanel: View {
         }.value
         guard !Task.isCancelled else { return }
         status = nextStatus
+    }
+}
+
+private struct CCXWorkCreateSection: View {
+    let project: CCXProjectSummary
+    let status: CCXTaskSourceFileStatus
+    let sourceStore: CCXTaskSourceStore
+    let candidates: [CCXTaskSourceWorkItemCandidate]
+
+    private var selectedCandidate: CCXTaskSourceWorkItemCandidate? {
+        sourceStore.selectedWorkItemCandidate(in: candidates)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(String(localized: "ccx.tasks.workCreate.title", defaultValue: "Create WorkExecution"))
+                .font(.headline)
+            Picker(
+                String(localized: "ccx.tasks.workCreate.selection", defaultValue: "Task source item"),
+                selection: Binding(
+                    get: {
+                        selectedCandidate?.id ?? ""
+                    },
+                    set: { newValue in
+                        sourceStore.selectedWorkItemCandidateId = newValue
+                    }
+                )
+            ) {
+                ForEach(candidates) { candidate in
+                    Text(candidate.displayText).tag(candidate.id)
+                }
+            }
+            .disabled(candidates.isEmpty || sourceStore.isCreatingWork || !status.canOpen)
+
+            if sourceStore.isDirty {
+                Text(String(localized: "ccx.tasks.workCreate.unsaved",
+                            defaultValue: "Save or discard unsaved changes before creating a WorkExecution."))
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+            }
+
+            if let statusMessage = sourceStore.workCreateStatusMessage {
+                Text(statusMessage)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            if let error = sourceStore.workCreateErrorMessage {
+                Text(error)
+                    .font(.callout)
+                    .foregroundStyle(.red)
+            }
+
+            Button {
+                Task {
+                    await sourceStore.createWorkExecutionFromSelection(project: project)
+                }
+            } label: {
+                Label(String(localized: "ccx.tasks.workCreate.submit", defaultValue: "Create and Attach Worker"),
+                      systemImage: "hammer")
+            }
+            .disabled(!sourceStore.canCreateWorkExecution(selectedCandidate: selectedCandidate) || !status.canOpen)
+        }
     }
 }
 

@@ -7,7 +7,14 @@ final class CCXTaskSourceStore {
     typealias CLIProvider = () -> Result<CCXControllerCLI, CCXControllerCLIError>
 
     private(set) var snapshot: CCXTaskSourceSnapshot?
-    var draftContent = ""
+    private var _draftContent = ""
+    var draftContent: String {
+        get { _draftContent }
+        set {
+            _draftContent = newValue
+            scheduleWorkItemCandidateParse(for: newValue)
+        }
+    }
     private(set) var isLoading = false
     private(set) var isSaving = false
     private(set) var isComposing = false
@@ -16,8 +23,15 @@ final class CCXTaskSourceStore {
     private(set) var composerErrorMessage: String?
     private(set) var composerStatusMessage: String?
     private(set) var sourceChangeMessage: String?
+    private(set) var workCreateErrorMessage: String?
+    private(set) var workCreateStatusMessage: String?
+    private(set) var workItemCandidates: [CCXTaskSourceWorkItemCandidate] = []
+    private(set) var isCreatingWork = false
     private var pendingSourceChangeHash: String?
+    private(set) var lastCreatedWorkExecutionId: String?
+    private let workExecutionCreator = CCXWorkExecutionCreator()
     var composerInput = ""
+    var selectedWorkItemCandidateId: String?
     var desiredTaskFormat = String(
         localized: "ccx.defaultTaskFormat",
         defaultValue: "- [ ] <actionable task title>\n  - context: <why this matters>\n  - acceptance: <how to verify it>"
@@ -27,6 +41,8 @@ final class CCXTaskSourceStore {
     private let projectId: String
     @ObservationIgnored
     private let cliProvider: CLIProvider
+    @ObservationIgnored
+    private var workItemCandidatesParseTask: Task<Void, Never>?
 
     init(
         projectId: String,
@@ -34,6 +50,10 @@ final class CCXTaskSourceStore {
     ) {
         self.projectId = projectId
         self.cliProvider = cliProvider
+    }
+
+    deinit {
+        workItemCandidatesParseTask?.cancel()
     }
 
     var isDirty: Bool {
@@ -47,6 +67,31 @@ final class CCXTaskSourceStore {
 
     var canSubmitComposer: Bool {
         !composerInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isComposing
+    }
+
+    var selectedWorkItemCandidate: CCXTaskSourceWorkItemCandidate? {
+        selectedWorkItemCandidate(in: workItemCandidates)
+    }
+
+    func selectedWorkItemCandidate(in candidates: [CCXTaskSourceWorkItemCandidate]) -> CCXTaskSourceWorkItemCandidate? {
+        if let selectedWorkItemCandidateId,
+           let selected = candidates.first(where: { $0.id == selectedWorkItemCandidateId }) {
+            return selected
+        }
+        return candidates.first
+    }
+
+    var canCreateWorkExecution: Bool {
+        canCreateWorkExecution(selectedCandidate: selectedWorkItemCandidate)
+    }
+
+    func canCreateWorkExecution(selectedCandidate: CCXTaskSourceWorkItemCandidate?) -> Bool {
+        snapshot != nil
+            && selectedCandidate != nil
+            && !isDirty
+            && !isLoading
+            && !isSaving
+            && !isCreatingWork
     }
 
     var loadedHash: String? {
@@ -81,7 +126,7 @@ final class CCXTaskSourceStore {
 
         do {
             let loaded = try await cli().readTaskSource(projectId: projectId)
-            apply(snapshot: loaded)
+            await apply(snapshot: loaded)
             sourceChangeMessage = nil
         } catch {
             errorMessage = Self.message(for: error)
@@ -134,6 +179,24 @@ final class CCXTaskSourceStore {
         composerStatusMessage = nil
     }
 
+    func createWorkExecutionFromSelection(project: CCXProjectSummary) async {
+        guard canCreateWorkExecution, let candidate = selectedWorkItemCandidate else { return }
+        isCreatingWork = true
+        workCreateErrorMessage = nil
+        defer { isCreatingWork = false }
+
+        let result = await workExecutionCreator.create(
+            project: project,
+            candidate: candidate,
+            cli: cli
+        )
+        workCreateStatusMessage = result.statusMessage
+        workCreateErrorMessage = result.errorMessage
+        if let createdId = result.lastCreatedWorkExecutionId {
+            lastCreatedWorkExecutionId = createdId
+        }
+    }
+
     func save() async {
         guard canSave, let expectedHash = snapshot?.hash else { return }
         isSaving = true
@@ -147,7 +210,7 @@ final class CCXTaskSourceStore {
                 expectedHash: expectedHash,
                 content: draftContent
             )
-            snapshot = CCXTaskSourceSnapshot(
+            let updatedSnapshot = CCXTaskSourceSnapshot(
                 projectId: result.projectId,
                 path: result.path,
                 content: draftContent,
@@ -155,6 +218,7 @@ final class CCXTaskSourceStore {
                 mtime: result.mtime,
                 warning: result.warning
             )
+            await apply(snapshot: updatedSnapshot)
             sourceChangeMessage = nil
         } catch {
             if Self.isConflict(error) {
@@ -188,7 +252,7 @@ final class CCXTaskSourceStore {
             } else {
                 sessionId = try await cli.startOrchestrator(projectId: project.projectId).agentSessionId
             }
-            let prompt = Self.orchestratorPrompt(
+            let prompt = CCXTaskComposerSupport.prompt(
                 request: request,
                 project: project,
                 workExecutions: workExecutions,
@@ -201,52 +265,73 @@ final class CCXTaskSourceStore {
                 defaultValue: "Sent to Orchestrator."
             )
         } catch {
-            composerErrorMessage = Self.composerMessage(for: error)
+            composerErrorMessage = CCXTaskComposerSupport.message(for: error)
         }
     }
 
-    static func orchestratorPrompt(
-        request: String,
-        project: CCXProjectSummary,
-        workExecutions: [CCXWorkExecution],
-        desiredTaskFormat: String
-    ) -> String {
-        let executionSummary = workExecutions.isEmpty
-            ? "- none"
-            : workExecutions.prefix(20).map { execution in
-                "- \(execution.workExecutionId): state=\(execution.state), branch=\(execution.branchName ?? "none"), task=\(execution.displayText ?? "none")"
-            }.joined(separator: "\n")
-
-        return """
-        GUI task intake request.
-
-        Project:
-        - project_id: \(project.projectId)
-        - canonical_repo: \(project.canonicalRepo)
-        - task_source_file: \(project.taskSourceFile)
-
-        Current WorkExecution state:
-        \(executionSummary)
-
-        Desired task source append format:
-        \(desiredTaskFormat)
-
-        User original request:
-        \(request)
-
-        Instructions:
-            - Inspect the repository code before changing the task source when code context is needed.
-            - Split and detail the request into actionable task-source entries when useful.
-            - Update the task source file with the refined task content.
-            - Prefer `ccx task-source append` or `ccx task-source write` so the controller records the reflection event.
-            - Preserve the GUI original request in the task source entry or nearby context.
-            - Do not overwrite unrelated task source content.
-        """
+    static func workItemCandidates(in markdown: String) -> [CCXTaskSourceWorkItemCandidate] {
+        CCXWorkItemCandidateParser.parse(markdown)
     }
 
-    private func apply(snapshot: CCXTaskSourceSnapshot) {
+    private func apply(snapshot: CCXTaskSourceSnapshot) async {
+        guard !Task.isCancelled else { return }
         self.snapshot = snapshot
-        self.draftContent = snapshot.content
+        _draftContent = snapshot.content
+        let parseTask = scheduleWorkItemCandidateParse(for: snapshot.content, prunePendingAttempts: true)
+        await withTaskCancellationHandler {
+            await parseTask.value
+        } onCancel: {
+            parseTask.cancel()
+        }
+        guard !Task.isCancelled else {
+            scheduleWorkItemCandidateParse(for: snapshot.content, prunePendingAttempts: true)
+            return
+        }
+    }
+
+    @discardableResult
+    private func scheduleWorkItemCandidateParse(
+        for markdown: String,
+        prunePendingAttempts: Bool = false
+    ) -> Task<Void, Never> {
+        workItemCandidatesParseTask?.cancel()
+        let task = Task { [weak self, markdown, prunePendingAttempts] in
+            let parseTask = Task.detached(priority: .userInitiated) {
+                CCXWorkItemCandidateParser.parse(markdown)
+            }
+            let candidates = await withTaskCancellationHandler {
+                await parseTask.value
+            } onCancel: {
+                parseTask.cancel()
+            }
+            guard !Task.isCancelled else { return }
+            self?.updateWorkItemCandidates(candidates, for: markdown, prunePendingAttempts: prunePendingAttempts)
+        }
+        workItemCandidatesParseTask = task
+        return task
+    }
+
+    private func updateWorkItemCandidates(
+        _ candidates: [CCXTaskSourceWorkItemCandidate],
+        for markdown: String,
+        prunePendingAttempts: Bool = false
+    ) {
+        guard draftContent == markdown else { return }
+        workItemCandidatesParseTask?.cancel()
+        workItemCandidatesParseTask = nil
+        if prunePendingAttempts {
+            workExecutionCreator.discardPendingAttemptsMissing(from: candidates)
+        }
+        workItemCandidates = candidates
+        clearMissingWorkItemSelection(in: candidates)
+    }
+
+    private func clearMissingWorkItemSelection(in candidates: [CCXTaskSourceWorkItemCandidate]) {
+        guard let selectedWorkItemCandidateId else { return }
+        let candidateIds = Set(candidates.map(\.id))
+        if !candidateIds.contains(selectedWorkItemCandidateId) {
+            self.selectedWorkItemCandidateId = nil
+        }
     }
 
     private func cli() throws -> CCXControllerCLI {
@@ -280,18 +365,4 @@ final class CCXTaskSourceStore {
                       defaultValue: "Could not update the task source. Reload, check the file, then try again.")
     }
 
-    private static func composerMessage(for error: Error) -> String {
-        if let cliError = error as? CCXControllerCLIError {
-            switch cliError {
-            case .executableNotFound, .notExecutable, .launchFailed:
-                return String(localized: "ccx.tasks.editor.error.cliUnavailable",
-                              defaultValue: "CCX controller CLI is not available. Check the CCX installation, then try again.")
-            case .processFailed, .invalidJSON, .timedOut, .cancelled:
-                return String(localized: "ccx.tasks.composer.error.generic",
-                              defaultValue: "Could not send the request to Orchestrator. Check the agent session, then try again.")
-            }
-        }
-        return String(localized: "ccx.tasks.composer.error.generic",
-                      defaultValue: "Could not send the request to Orchestrator. Check the agent session, then try again.")
-    }
 }

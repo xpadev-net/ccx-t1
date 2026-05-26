@@ -297,6 +297,79 @@ final class CCXControllerCLITests: XCTestCase {
         XCTAssertEqual(prompted.status, "sent")
     }
 
+    func testCreateWorkPassesArgumentsAndDecodesResult() async throws {
+        let stdout = """
+        {
+          "work_execution_id": "we_1",
+          "branch_name": "ccx/we_1/task",
+          "worktree_path": "/ccx/projects/p_123/worktrees/we_1",
+          "task_file_path": "/ccx/projects/p_123/work-executions/we_1/task.md"
+        }
+        """.data(using: .utf8)!
+        var capturedArguments: [String] = []
+        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, arguments, stdin in
+            capturedArguments = arguments
+            XCTAssertNil(stdin)
+            return CCXControllerCLIProcessResult(exitCode: 0, stdout: stdout, stderr: Data())
+        }
+
+        let created = try await cli.createWork(
+            projectId: "p_123",
+            sourcePath: "/repo/z/tasks.md",
+            selectorType: "checkbox",
+            selectorValue: "L2:- [ ] Build",
+            displayText: "Build"
+        )
+
+        XCTAssertEqual(capturedArguments, [
+            "work", "create",
+            "--project-id", "p_123",
+            "--source-path", "/repo/z/tasks.md",
+            "--selector-type", "checkbox",
+            "--selector-value", "L2:- [ ] Build",
+            "--display-text", "Build",
+            "--json",
+        ])
+        XCTAssertEqual(created.workExecutionId, "we_1")
+        XCTAssertEqual(created.branchName, "ccx/we_1/task")
+    }
+
+    func testAttachAgentPassesArgumentsAndDecodesResult() async throws {
+        let stdout = """
+        {
+          "agent_session_id": "sess_1",
+          "work_execution_id": "we_1",
+          "role": "worker",
+          "mode": "writer",
+          "status": "attached"
+        }
+        """.data(using: .utf8)!
+        var capturedArguments: [String] = []
+        let cli = CCXControllerCLI(executableURL: URL(fileURLWithPath: "/bin/ccx")) { _, arguments, stdin in
+            capturedArguments = arguments
+            XCTAssertNil(stdin)
+            return CCXControllerCLIProcessResult(exitCode: 0, stdout: stdout, stderr: Data())
+        }
+
+        let attached = try await cli.attachAgent(
+            projectId: "p_123",
+            workExecutionId: "we_1",
+            role: "worker",
+            mode: "writer"
+        )
+
+        XCTAssertEqual(capturedArguments, [
+            "agent", "attach",
+            "--project-id", "p_123",
+            "--work-execution-id", "we_1",
+            "--role", "worker",
+            "--mode", "writer",
+            "--json",
+        ])
+        XCTAssertEqual(attached.agentSessionId, "sess_1")
+        XCTAssertEqual(attached.status, "attached")
+    }
+
     func testRegisterTimeoutTerminatesProcess() async throws {
         let executable = try makeFile(named: "ccx", content: "#!/bin/sh\nsleep 60\n")
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)

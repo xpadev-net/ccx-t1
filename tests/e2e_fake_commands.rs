@@ -450,6 +450,402 @@ fn task_source_json_warns_when_canonical_repo_is_dirty() {
 }
 
 #[test]
+fn work_create_materializes_execution_task_file_and_worktree() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("ccx-home");
+    let repo = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    Command::new("git")
+        .args(["init"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["config", "user.name", "Test User"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    std::fs::write(repo.join("README.md"), "hello\n").unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "initial"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    let tasks = repo.join("tasks.md");
+    std::fs::write(&tasks, "# Phase\n- [ ] Fix: crash #42\n").unwrap();
+    let project_id = register_project(&home, &repo, &tasks);
+
+    let (code, stdout, stderr) = run_ccx(
+        &[
+            "work",
+            "create",
+            "--project-id",
+            &project_id,
+            "--source-path",
+            tasks.to_str().unwrap(),
+            "--selector-type",
+            "checkbox",
+            "--selector-value",
+            "L2:- [ ] Fix: crash #42",
+            "--display-text",
+            "Fix: crash #42",
+            "--json",
+        ],
+        &[],
+        &home,
+    );
+
+    assert_eq!(code, 0, "work create failed: {stderr}");
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let work_execution_id = json["work_execution_id"].as_str().unwrap();
+    let worktree_path = std::path::PathBuf::from(json["worktree_path"].as_str().unwrap());
+    let task_file_path = std::path::PathBuf::from(json["task_file_path"].as_str().unwrap());
+    assert!(worktree_path.exists());
+    assert!(task_file_path.exists());
+    assert!(worktree_path.join(".ccx-task.md").exists());
+    let task_md = std::fs::read_to_string(&task_file_path).unwrap();
+    assert!(task_md.contains("status: assigned"));
+    assert!(task_md.contains("Fix: crash #42"));
+    let front_matter = task_md
+        .strip_prefix("---\n")
+        .and_then(|rest| rest.split_once("---\n"))
+        .map(|(yaml, _)| yaml)
+        .expect("task.md should contain YAML front matter");
+    let parsed_front_matter: serde_yaml::Value =
+        serde_yaml::from_str(front_matter).expect("front matter should be valid YAML");
+    assert_eq!(
+        parsed_front_matter["source_ref"].as_str(),
+        Some("checkbox:L2:- [ ] Fix: crash #42")
+    );
+    assert_eq!(
+        parsed_front_matter["updated_by"].as_str(),
+        Some("controller")
+    );
+
+    let events_raw =
+        std::fs::read_to_string(home.join("projects").join(&project_id).join("events.jsonl"))
+            .unwrap();
+    let event_types: Vec<String> = events_raw
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .map(|event| event["event_type"].as_str().unwrap().to_string())
+        .collect();
+    let created_at = event_types
+        .iter()
+        .position(|event_type| event_type == "work_execution_created")
+        .unwrap();
+    let branch_at = event_types
+        .iter()
+        .position(|event_type| event_type == "branch_created")
+        .unwrap();
+    let worktree_at = event_types
+        .iter()
+        .position(|event_type| event_type == "worktree_created")
+        .unwrap();
+    assert!(
+        created_at < branch_at && created_at < worktree_at,
+        "WorkExecutionCreated should precede child artifact events: {event_types:?}"
+    );
+    assert!(event_types.contains(&"work_execution_task_file_created".to_string()));
+    assert!(event_types.contains(&"work_execution_state_changed".to_string()));
+
+    let db =
+        rusqlite::Connection::open(home.join("projects").join(&project_id).join("state.sqlite"))
+            .unwrap();
+    let row: (String, String, String) = db
+        .query_row(
+            "SELECT state, branch_name, task_file_path FROM work_executions WHERE work_execution_id = ?1",
+            rusqlite::params![work_execution_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(row.0, "task_file_created");
+    assert_eq!(row.1, json["branch_name"].as_str().unwrap());
+    assert_eq!(row.2, task_file_path.to_str().unwrap());
+}
+
+#[test]
+fn work_create_cleans_artifacts_when_event_batch_rolls_back() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("ccx-home");
+    let repo = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    Command::new("git")
+        .args(["init"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["config", "user.name", "Test User"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    std::fs::write(repo.join("README.md"), "hello\n").unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "initial"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    let tasks = repo.join("tasks.md");
+    std::fs::write(&tasks, "- [ ] Create rollback test\n").unwrap();
+    let project_id = register_project(&home, &repo, &tasks);
+
+    let (code, _stdout, stderr) = run_ccx(
+        &[
+            "work",
+            "create",
+            "--project-id",
+            &project_id,
+            "--source-path",
+            tasks.to_str().unwrap(),
+            "--selector-type",
+            "checkbox",
+            "--selector-value",
+            "L1:- [ ] Create rollback test",
+            "--display-text",
+            "Create rollback test",
+            "--json",
+        ],
+        &[("CCX_TEST_FAIL_EVENT_BATCH_AFTER_LINES", "1")],
+        &home,
+    );
+
+    assert_ne!(
+        code, 0,
+        "work create should fail after injected append error"
+    );
+    assert!(
+        stderr.contains("simulated event batch append failure"),
+        "stderr should report injected failure: {stderr}"
+    );
+    let project_dir = home.join("projects").join(&project_id);
+    let execution_entries = std::fs::read_dir(project_dir.join("work-executions"))
+        .map(|entries| entries.count())
+        .unwrap_or(0);
+    assert_eq!(
+        execution_entries, 0,
+        "rolled-back event append should clean execution artifacts"
+    );
+    let worktree_entries = std::fs::read_dir(project_dir.join("worktrees"))
+        .map(|entries| entries.count())
+        .unwrap_or(0);
+    assert_eq!(
+        worktree_entries, 0,
+        "rolled-back event append should clean worktree artifacts"
+    );
+    let events_raw = std::fs::read_to_string(project_dir.join("events.jsonl")).unwrap();
+    assert!(
+        !events_raw.contains("work_execution_created"),
+        "rolled-back event append must not leave authoritative WorkExecution events"
+    );
+    let worktree_list = Command::new("git")
+        .args(["worktree", "list"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    let worktree_stdout = String::from_utf8_lossy(&worktree_list.stdout);
+    assert!(
+        !worktree_stdout.contains("ccx/"),
+        "rolled-back event append should remove the git worktree and branch"
+    );
+    let db = rusqlite::Connection::open(project_dir.join("state.sqlite")).unwrap();
+    let count: i64 = db
+        .query_row("SELECT COUNT(*) FROM work_executions", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 0);
+}
+
+#[test]
+fn work_create_preserves_execution_dir_when_worktree_cleanup_fails() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("ccx-home");
+    let repo = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    Command::new("git")
+        .args(["init"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["config", "user.name", "Test User"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    std::fs::write(repo.join("README.md"), "hello\n").unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "initial"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    let tasks = repo.join("tasks.md");
+    std::fs::write(&tasks, "- [ ] Preserve symlink target\n").unwrap();
+    let project_id = register_project(&home, &repo, &tasks);
+
+    let (code, _stdout, stderr) = run_ccx(
+        &[
+            "work",
+            "create",
+            "--project-id",
+            &project_id,
+            "--source-path",
+            tasks.to_str().unwrap(),
+            "--selector-type",
+            "checkbox",
+            "--selector-value",
+            "L1:- [ ] Preserve symlink target",
+            "--display-text",
+            "Preserve symlink target",
+            "--json",
+        ],
+        &[
+            ("CCX_TEST_FAIL_EVENT_BATCH_AFTER_LINES", "1"),
+            ("CCX_TEST_FAIL_WORK_CREATE_CLEANUP_REMOVE_WORKTREE", "1"),
+        ],
+        &home,
+    );
+
+    assert_ne!(code, 0, "work create should fail after append injection");
+    assert!(
+        stderr.contains("simulated event batch append failure"),
+        "stderr should report injected failure: {stderr}"
+    );
+    let project_dir = home.join("projects").join(&project_id);
+    let execution_dirs: Vec<_> = std::fs::read_dir(project_dir.join("work-executions"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    assert_eq!(
+        execution_dirs.len(),
+        1,
+        "failed worktree cleanup should preserve execution artifacts"
+    );
+    assert!(
+        execution_dirs[0].join("task.md").exists(),
+        "preserved execution dir should keep the worktree symlink target"
+    );
+    let worktree_dirs: Vec<_> = std::fs::read_dir(project_dir.join("worktrees"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    assert_eq!(
+        worktree_dirs.len(),
+        1,
+        "failed worktree cleanup should leave the worktree for manual recovery"
+    );
+    let symlink_target = std::fs::read_link(worktree_dirs[0].join(".ccx-task.md")).unwrap();
+    assert!(
+        symlink_target.exists(),
+        "worktree task symlink should not dangle"
+    );
+}
+
+#[test]
+fn work_create_cleans_execution_dir_when_pre_worktree_setup_fails() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("ccx-home");
+    let repo = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    Command::new("git")
+        .args(["init"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["config", "user.name", "Test User"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    std::fs::write(repo.join("README.md"), "hello\n").unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "initial"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    let tasks = repo.join("tasks.md");
+    std::fs::write(&tasks, "- [ ] Create setup failure test\n").unwrap();
+    let project_id = register_project(&home, &repo, &tasks);
+
+    let (code, _stdout, stderr) = run_ccx(
+        &[
+            "work",
+            "create",
+            "--project-id",
+            &project_id,
+            "--source-path",
+            tasks.to_str().unwrap(),
+            "--selector-type",
+            "checkbox",
+            "--selector-value",
+            "L1:- [ ] Create setup failure test",
+            "--display-text",
+            "Create setup failure test",
+            "--json",
+        ],
+        &[("CCX_TEST_FAIL_WORK_CREATE_AFTER_EXECUTION_DIR", "1")],
+        &home,
+    );
+
+    assert_ne!(
+        code, 0,
+        "work create should fail after injected setup error"
+    );
+    assert!(
+        stderr.contains("simulated work create failure after execution dir"),
+        "stderr should report injected failure: {stderr}"
+    );
+    let project_dir = home.join("projects").join(&project_id);
+    let execution_entries = std::fs::read_dir(project_dir.join("work-executions"))
+        .map(|entries| entries.count())
+        .unwrap_or(0);
+    assert_eq!(
+        execution_entries, 0,
+        "pre-worktree setup failure should clean the empty execution dir"
+    );
+    let events_raw = std::fs::read_to_string(project_dir.join("events.jsonl")).unwrap();
+    assert!(!events_raw.contains("work_execution_created"));
+}
+
+#[test]
 fn fake_gh_review_hook_exit_0_is_accepted() {
     let fake_hook = fixture_bin_dir().join("gh-review-hook");
     let tmp = tempfile::tempdir().unwrap();

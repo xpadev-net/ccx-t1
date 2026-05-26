@@ -276,6 +276,9 @@
 		CCC00000000000000000B012 /* CCXTaskSourceFileStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F012 /* CCXTaskSourceFileStatus.swift */; };
 		CCC00000000000000000B013 /* CCXTasksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F013 /* CCXTasksView.swift */; };
 		CCC00000000000000000B014 /* CCXTaskSourceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F014 /* CCXTaskSourceStore.swift */; };
+		CCC00000000000000000B015 /* CCXWorkItemCandidateParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F015 /* CCXWorkItemCandidateParser.swift */; };
+		CCC00000000000000000B016 /* CCXWorkExecutionCreator.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F016 /* CCXWorkExecutionCreator.swift */; };
+		CCC00000000000000000B017 /* CCXTaskComposerSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F017 /* CCXTaskComposerSupport.swift */; };
 		CCC00000000000000000B011 /* CCXProjectRegistrationModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F011 /* CCXProjectRegistrationModel.swift */; };
 		CCC00000000000000000B110 /* CCXProjectPickerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F110 /* CCXProjectPickerTests.swift */; };
 		CCC00000000000000000B111 /* CCXTaskSourceStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC00000000000000000F111 /* CCXTaskSourceStoreTests.swift */; };
@@ -866,6 +869,9 @@
 		CCC00000000000000000F012 /* CCXTaskSourceFileStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXTaskSourceFileStatus.swift; sourceTree = "<group>"; };
 		CCC00000000000000000F013 /* CCXTasksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXTasksView.swift; sourceTree = "<group>"; };
 		CCC00000000000000000F014 /* CCXTaskSourceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXTaskSourceStore.swift; sourceTree = "<group>"; };
+		CCC00000000000000000F015 /* CCXWorkItemCandidateParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXWorkItemCandidateParser.swift; sourceTree = "<group>"; };
+		CCC00000000000000000F016 /* CCXWorkExecutionCreator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXWorkExecutionCreator.swift; sourceTree = "<group>"; };
+		CCC00000000000000000F017 /* CCXTaskComposerSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXTaskComposerSupport.swift; sourceTree = "<group>"; };
 		CCC00000000000000000F110 /* CCXProjectPickerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXProjectPickerTests.swift; sourceTree = "<group>"; };
 		CCC00000000000000000F111 /* CCXTaskSourceStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCXTaskSourceStoreTests.swift; sourceTree = "<group>"; };
 		A50012F2 /* KeyboardShortcutSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardShortcutSettings.swift; sourceTree = "<group>"; };
@@ -1207,6 +1213,9 @@
 				CCC00000000000000000F012 /* CCXTaskSourceFileStatus.swift */,
 				CCC00000000000000000F013 /* CCXTasksView.swift */,
 				CCC00000000000000000F014 /* CCXTaskSourceStore.swift */,
+				CCC00000000000000000F015 /* CCXWorkItemCandidateParser.swift */,
+				CCC00000000000000000F016 /* CCXWorkExecutionCreator.swift */,
+				CCC00000000000000000F017 /* CCXTaskComposerSupport.swift */,
 			);
 			name = CCX;
 			path = CCX;
@@ -2126,6 +2135,9 @@
 				CCC00000000000000000B012 /* CCXTaskSourceFileStatus.swift in Sources */,
 				CCC00000000000000000B013 /* CCXTasksView.swift in Sources */,
 				CCC00000000000000000B014 /* CCXTaskSourceStore.swift in Sources */,
+				CCC00000000000000000B015 /* CCXWorkItemCandidateParser.swift in Sources */,
+				CCC00000000000000000B016 /* CCXWorkExecutionCreator.swift in Sources */,
+				CCC00000000000000000B017 /* CCXTaskComposerSupport.swift in Sources */,
 					A50012F3 /* KeyboardShortcutSettings.swift in Sources */,
 				C0DE7B100000000000000001 /* TextBoxInput.swift in Sources */,
 					C1713004C1713004C1713004 /* KeyboardShortcutSettingsLookup.swift in Sources */,

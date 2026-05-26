@@ -81,6 +81,48 @@ final class CCXTaskSourceStoreTests: XCTestCase {
         XCTAssertFalse(store.isDirty)
     }
 
+    func testSavePreservesWorkItemSelectionAfterLineShift() async {
+        var invocations = 0
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, arguments, _ in
+                invocations += 1
+                if arguments.contains("read") {
+                    return .success(Self.result(stdout: """
+                    {
+                      "project_id": "p_123",
+                      "path": "/repo/z/tasks.md",
+                      "content": "- [ ] First\\n- [ ] Second\\n",
+                      "hash": "hash-1",
+                      "mtime": "2026-05-26T00:00:00Z",
+                      "warning": null
+                    }
+                    """))
+                }
+                return .success(Self.result(stdout: """
+                {
+                  "project_id": "p_123",
+                  "path": "/repo/z/tasks.md",
+                  "hash": "hash-2",
+                  "mtime": "2026-05-26T00:00:01Z",
+                  "bytes_written": 29,
+                  "warning": null
+                }
+                """))
+            })
+        }
+
+        await store.load()
+        let selectedId = store.workItemCandidates[1].id
+        store.selectedWorkItemCandidateId = selectedId
+        store.draftContent = "# New heading\n- [ ] First\n- [ ] Second\n"
+        await store.save()
+
+        XCTAssertEqual(invocations, 2)
+        XCTAssertEqual(store.selectedWorkItemCandidateId, selectedId)
+        XCTAssertEqual(store.selectedWorkItemCandidate?.displayText, "Second")
+        XCTAssertFalse(store.isDirty)
+    }
+
     func testSaveConflictKeepsDraft() async {
         var invocations = 0
         let store = CCXTaskSourceStore(projectId: "p_123") {
@@ -175,7 +217,7 @@ final class CCXTaskSourceStoreTests: XCTestCase {
     }
 
     func testOrchestratorPromptIncludesProjectStateFormatAndOriginalRequest() {
-        let prompt = CCXTaskSourceStore.orchestratorPrompt(
+        let prompt = CCXTaskComposerSupport.prompt(
             request: "Add export support",
             project: Self.project,
             workExecutions: [
@@ -605,6 +647,865 @@ final class CCXTaskSourceStoreTests: XCTestCase {
 
         XCTAssertEqual(store.draftContent, "loaded")
         XCTAssertFalse(store.isDirty)
+    }
+
+    func testWorkItemCandidatesIncludeHeadingsAndCheckboxes() {
+        let candidates = CCXTaskSourceStore.workItemCandidates(in: """
+        # Phase 1
+        text
+        - [ ] Build create flow
+        * [x] done
+        ## Phase 2
+        """)
+
+        XCTAssertEqual(candidates.map(\.selectorType), ["heading", "checkbox", "heading"])
+        XCTAssertEqual(candidates[0].displayText, "Phase 1")
+        XCTAssertEqual(candidates[0].selectorValue, "L1:# Phase 1")
+        XCTAssertEqual(candidates[1].displayText, "Build create flow")
+        XCTAssertEqual(candidates[1].selectorValue, "L3:- [ ] Build create flow")
+        XCTAssertEqual(candidates[2].selectorValue, "L5:## Phase 2")
+    }
+
+    func testWorkItemCandidatesTrimCRLFAndUseTextStableIds() {
+        let candidates = CCXTaskSourceStore.workItemCandidates(in: "# Phase 1\r\n- [ ] Build create flow\r\n")
+
+        XCTAssertEqual(candidates.map(\.displayText), ["Phase 1", "Build create flow"])
+        XCTAssertEqual(candidates.map(\.id), [
+            "heading-phase 1-1",
+            "checkbox-build create flow-1",
+        ])
+        XCTAssertEqual(candidates[0].selectorValue, "L1:# Phase 1")
+        XCTAssertEqual(candidates[1].selectorValue, "L2:- [ ] Build create flow")
+    }
+
+    func testWorkItemCandidatesIgnoreHashtagLines() {
+        let candidates = CCXTaskSourceStore.workItemCandidates(in: """
+        #42-follow-up
+        #important
+        # Valid heading
+        ###
+        """)
+
+        XCTAssertEqual(candidates.map(\.displayText), ["Valid heading"])
+    }
+
+    func testCreateWorkExecutionCreatesAttachesAndPromptsWorker() async {
+        var calls: [[String]] = []
+        var promptedMessage: String?
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, arguments, stdin in
+                calls.append(arguments)
+                if arguments.contains("read") {
+                    return .success(Self.result(stdout: """
+                    {
+                      "project_id": "p_123",
+                      "path": "/repo/z/tasks.md",
+                      "content": "- [ ] Build create flow\\n",
+                      "hash": "hash-1",
+                      "mtime": "2026-05-26T00:00:00Z",
+                      "warning": null
+                    }
+                    """))
+                }
+                if arguments.contains("create") {
+                    return .success(Self.result(stdout: """
+                    {
+                      "work_execution_id": "we_1",
+                      "branch_name": "ccx/we_1/build",
+                      "worktree_path": "/worktrees/we_1",
+                      "task_file_path": "/work-executions/we_1/task.md"
+                    }
+                    """))
+                }
+                if arguments.contains("attach") {
+                    return .success(Self.result(stdout: """
+                    {
+                      "agent_session_id": "sess_worker",
+                      "work_execution_id": "we_1",
+                      "role": "worker",
+                      "mode": "writer",
+                      "status": "attached"
+                    }
+                    """))
+                }
+                promptedMessage = String(data: stdin ?? Data(), encoding: .utf8)
+                return .success(Self.result(stdout: """
+                {
+                  "session_id": "sess_worker",
+                  "status": "sent"
+                }
+                """))
+            })
+        }
+        await store.load()
+
+        await store.createWorkExecutionFromSelection(project: Self.project)
+
+        XCTAssertEqual(calls.map { Array($0.prefix(2)) }, [
+            ["task-source", "read"],
+            ["work", "create"],
+            ["agent", "attach"],
+            ["agent", "prompt"],
+        ])
+        XCTAssertTrue(calls[1].contains("checkbox"))
+        XCTAssertTrue(calls[1].contains("Build create flow"))
+        XCTAssertTrue(promptedMessage?.contains("we_1") ?? false)
+        XCTAssertNotNil(store.workCreateStatusMessage)
+        XCTAssertNil(store.workCreateErrorMessage)
+    }
+
+    func testCreateWorkExecutionDoesNotUseUnsavedDraftCandidate() async {
+        var calls: [[String]] = []
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, arguments, _ in
+                calls.append(arguments)
+                return .success(Self.result(stdout: """
+                {
+                  "project_id": "p_123",
+                  "path": "/repo/z/tasks.md",
+                  "content": "- [ ] Saved item\\n",
+                  "hash": "hash-1",
+                  "mtime": "2026-05-26T00:00:00Z",
+                  "warning": null
+                }
+                """))
+            })
+        }
+
+        await store.load()
+        store.draftContent = "- [ ] Unsaved item\n"
+        await store.createWorkExecutionFromSelection(project: Self.project)
+
+        XCTAssertTrue(store.isDirty)
+        XCTAssertFalse(store.canCreateWorkExecution)
+        XCTAssertEqual(calls, [
+            ["task-source", "read", "--project-id", "p_123", "--json"],
+        ])
+        XCTAssertNil(store.workCreateStatusMessage)
+    }
+
+    func testCreateWorkExecutionAttachFailureDoesNotRecreateOnRetry() async {
+        var calls: [[String]] = []
+        var attachAttempts = 0
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, arguments, _ in
+                calls.append(arguments)
+                if arguments.contains("read") {
+                    return .success(Self.result(stdout: """
+                    {
+                      "project_id": "p_123",
+                      "path": "/repo/z/tasks.md",
+                      "content": "- [ ] Build create flow\\n",
+                      "hash": "hash-1",
+                      "mtime": "2026-05-26T00:00:00Z",
+                      "warning": null
+                    }
+                    """))
+                }
+                if arguments.contains("create") {
+                    return .success(Self.result(stdout: """
+                    {
+                      "work_execution_id": "we_1",
+                      "branch_name": "ccx/we_1/build",
+                      "worktree_path": "/worktrees/we_1",
+                      "task_file_path": "/work-executions/we_1/task.md"
+                    }
+                    """))
+                }
+                if arguments.contains("attach") {
+                    attachAttempts += 1
+                    if attachAttempts == 1 {
+                        return .success(CCXControllerCLIProcessResult(
+                            exitCode: 1,
+                            stdout: Data(),
+                            stderr: Data("attach failed".utf8)
+                        ))
+                    }
+                    return .success(Self.result(stdout: """
+                    {
+                      "agent_session_id": "sess_worker",
+                      "work_execution_id": "we_1",
+                      "role": "worker",
+                      "mode": "writer",
+                      "status": "attached"
+                    }
+                    """))
+                }
+                return .success(Self.result(stdout: """
+                {
+                  "session_id": "sess_worker",
+                  "status": "sent"
+                }
+                """))
+            })
+        }
+
+        await store.load()
+        await store.createWorkExecutionFromSelection(project: Self.project)
+        XCTAssertEqual(store.lastCreatedWorkExecutionId, "we_1")
+        XCTAssertTrue(store.workCreateStatusMessage?.contains("we_1") ?? false)
+        XCTAssertNotNil(store.workCreateErrorMessage)
+
+        await store.createWorkExecutionFromSelection(project: Self.project)
+
+        XCTAssertEqual(
+            calls.map { Array($0.prefix(2)) },
+            [
+                ["task-source", "read"],
+                ["work", "create"],
+                ["agent", "attach"],
+                ["agent", "attach"],
+                ["agent", "prompt"],
+            ]
+        )
+        XCTAssertNotNil(store.workCreateStatusMessage)
+        XCTAssertNil(store.workCreateErrorMessage)
+    }
+
+    func testCreateWorkExecutionRetryRecreatesWhenCandidateContentDrifts() async {
+        var calls: [[String]] = []
+        var readAttempts = 0
+        var createAttempts = 0
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, arguments, _ in
+                calls.append(arguments)
+                if arguments.contains("read") {
+                    readAttempts += 1
+                    let content = readAttempts == 1
+                        ? "- [ ] Build create flow\\n"
+                        : "- [ ] Different task at same line\\n"
+                    return .success(Self.result(stdout: """
+                    {
+                      "project_id": "p_123",
+                      "path": "/repo/z/tasks.md",
+                      "content": "\(content)",
+                      "hash": "hash-\(readAttempts)",
+                      "mtime": "2026-05-26T00:00:00Z",
+                      "warning": null
+                    }
+                    """))
+                }
+                if arguments.contains("create") {
+                    createAttempts += 1
+                    return .success(Self.result(stdout: """
+                    {
+                      "work_execution_id": "we_\(createAttempts)",
+                      "branch_name": "ccx/we_\(createAttempts)/build",
+                      "worktree_path": "/worktrees/we_\(createAttempts)",
+                      "task_file_path": "/work-executions/we_\(createAttempts)/task.md"
+                    }
+                    """))
+                }
+                if arguments.contains("attach") {
+                    return .success(CCXControllerCLIProcessResult(
+                        exitCode: 1,
+                        stdout: Data(),
+                        stderr: Data("attach failed".utf8)
+                    ))
+                }
+                return .success(Self.result(stdout: """
+                {
+                  "session_id": "sess_worker",
+                  "status": "sent"
+                }
+                """))
+            })
+        }
+
+        await store.load()
+        store.selectedWorkItemCandidateId = store.workItemCandidates[0].id
+        await store.createWorkExecutionFromSelection(project: Self.project)
+        await store.load()
+        await store.createWorkExecutionFromSelection(project: Self.project)
+
+        XCTAssertEqual(createAttempts, 2)
+        XCTAssertEqual(store.lastCreatedWorkExecutionId, "we_2")
+        XCTAssertEqual(
+            calls.filter { Array($0.prefix(2)) == ["work", "create"] }.count,
+            2
+        )
+    }
+
+    func testCreateWorkExecutionRetrySurvivesLineShiftReload() async {
+        var readAttempts = 0
+        var createAttempts = 0
+        var attachAttempts = 0
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, arguments, _ in
+                if arguments.contains("read") {
+                    readAttempts += 1
+                    let content = readAttempts == 1
+                        ? "- [ ] Build create flow\\n"
+                        : "# Inserted heading\\n- [ ] Build create flow\\n"
+                    return .success(Self.result(stdout: """
+                    {
+                      "project_id": "p_123",
+                      "path": "/repo/z/tasks.md",
+                      "content": "\(content)",
+                      "hash": "hash-\(readAttempts)",
+                      "mtime": "2026-05-26T00:00:00Z",
+                      "warning": null
+                    }
+                    """))
+                }
+                if arguments.contains("create") {
+                    createAttempts += 1
+                    return .success(Self.result(stdout: """
+                    {
+                      "work_execution_id": "we_1",
+                      "branch_name": "ccx/we_1/build",
+                      "worktree_path": "/worktrees/we_1",
+                      "task_file_path": "/work-executions/we_1/task.md"
+                    }
+                    """))
+                }
+                if arguments.contains("attach") {
+                    attachAttempts += 1
+                    if attachAttempts == 1 {
+                        return .success(CCXControllerCLIProcessResult(
+                            exitCode: 1,
+                            stdout: Data(),
+                            stderr: Data("attach failed".utf8)
+                        ))
+                    }
+                    return .success(Self.result(stdout: """
+                    {
+                      "agent_session_id": "sess_worker",
+                      "work_execution_id": "we_1",
+                      "role": "worker",
+                      "mode": "writer",
+                      "status": "attached"
+                    }
+                    """))
+                }
+                return .success(Self.result(stdout: """
+                {
+                  "session_id": "sess_worker",
+                  "status": "sent"
+                }
+                """))
+            })
+        }
+
+        await store.load()
+        let selectedCandidateId = store.workItemCandidates[0].id
+        store.selectedWorkItemCandidateId = selectedCandidateId
+        await store.createWorkExecutionFromSelection(project: Self.project)
+        await store.load()
+        store.selectedWorkItemCandidateId = selectedCandidateId
+        await store.createWorkExecutionFromSelection(project: Self.project)
+
+        XCTAssertEqual(createAttempts, 1)
+        XCTAssertEqual(attachAttempts, 2)
+        XCTAssertNil(store.workCreateErrorMessage)
+    }
+
+    func testCreateWorkExecutionClearsPendingWhenCandidateDisappearsFromSnapshot() async {
+        var readAttempts = 0
+        var createAttempts = 0
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, arguments, _ in
+                if arguments.contains("read") {
+                    readAttempts += 1
+                    let content: String
+                    switch readAttempts {
+                    case 1:
+                        content = "- [ ] Build create flow\\n"
+                    case 2:
+                        content = "# No pending candidate\\n"
+                    default:
+                        content = "- [ ] Build create flow\\n"
+                    }
+                    return .success(Self.result(stdout: """
+                    {
+                      "project_id": "p_123",
+                      "path": "/repo/z/tasks.md",
+                      "content": "\(content)",
+                      "hash": "hash-\(readAttempts)",
+                      "mtime": "2026-05-26T00:00:00Z",
+                      "warning": null
+                    }
+                    """))
+                }
+                if arguments.contains("create") {
+                    createAttempts += 1
+                    return .success(Self.result(stdout: """
+                    {
+                      "work_execution_id": "we_\(createAttempts)",
+                      "branch_name": "ccx/we_\(createAttempts)/build",
+                      "worktree_path": "/worktrees/we_\(createAttempts)",
+                      "task_file_path": "/work-executions/we_\(createAttempts)/task.md"
+                    }
+                    """))
+                }
+                if arguments.contains("attach") {
+                    return .success(CCXControllerCLIProcessResult(
+                        exitCode: 1,
+                        stdout: Data(),
+                        stderr: Data("attach failed".utf8)
+                    ))
+                }
+                return .success(Self.result(stdout: """
+                {
+                  "session_id": "sess_worker",
+                  "status": "sent"
+                }
+                """))
+            })
+        }
+
+        await store.load()
+        let selectedCandidateId = store.workItemCandidates[0].id
+        store.selectedWorkItemCandidateId = selectedCandidateId
+        await store.createWorkExecutionFromSelection(project: Self.project)
+        await store.load()
+        await store.load()
+        store.selectedWorkItemCandidateId = selectedCandidateId
+        await store.createWorkExecutionFromSelection(project: Self.project)
+
+        XCTAssertEqual(createAttempts, 2)
+        XCTAssertEqual(store.lastCreatedWorkExecutionId, "we_2")
+        XCTAssertNotNil(store.workCreateErrorMessage)
+    }
+
+    func testCreateWorkExecutionClearsPendingWhenCandidateDisappearsOnSave() async {
+        var createAttempts = 0
+        var writeAttempts = 0
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, arguments, _ in
+                if arguments.contains("read") {
+                    return .success(Self.result(stdout: """
+                    {
+                      "project_id": "p_123",
+                      "path": "/repo/z/tasks.md",
+                      "content": "- [ ] Build create flow\\n",
+                      "hash": "hash-1",
+                      "mtime": "2026-05-26T00:00:00Z",
+                      "warning": null
+                    }
+                    """))
+                }
+                if arguments.contains("write") {
+                    writeAttempts += 1
+                    return .success(Self.result(stdout: """
+                    {
+                      "project_id": "p_123",
+                      "path": "/repo/z/tasks.md",
+                      "hash": "hash-write-\(writeAttempts)",
+                      "mtime": "2026-05-26T00:00:01Z",
+                      "bytes_written": 1,
+                      "warning": null
+                    }
+                    """))
+                }
+                if arguments.contains("create") {
+                    createAttempts += 1
+                    return .success(Self.result(stdout: """
+                    {
+                      "work_execution_id": "we_\(createAttempts)",
+                      "branch_name": "ccx/we_\(createAttempts)/build",
+                      "worktree_path": "/worktrees/we_\(createAttempts)",
+                      "task_file_path": "/work-executions/we_\(createAttempts)/task.md"
+                    }
+                    """))
+                }
+                if arguments.contains("attach") {
+                    return .success(CCXControllerCLIProcessResult(
+                        exitCode: 1,
+                        stdout: Data(),
+                        stderr: Data("attach failed".utf8)
+                    ))
+                }
+                return .success(Self.result(stdout: """
+                {
+                  "session_id": "sess_worker",
+                  "status": "sent"
+                }
+                """))
+            })
+        }
+
+        await store.load()
+        let selectedCandidateId = store.workItemCandidates[0].id
+        store.selectedWorkItemCandidateId = selectedCandidateId
+        await store.createWorkExecutionFromSelection(project: Self.project)
+        store.draftContent = "# No pending candidate\n"
+        await store.save()
+        store.draftContent = "- [ ] Build create flow\n"
+        await store.save()
+        store.selectedWorkItemCandidateId = selectedCandidateId
+        await store.createWorkExecutionFromSelection(project: Self.project)
+
+        XCTAssertEqual(createAttempts, 2)
+        XCTAssertEqual(store.lastCreatedWorkExecutionId, "we_2")
+        XCTAssertNotNil(store.workCreateErrorMessage)
+    }
+
+    func testCreateWorkExecutionSelectionChangeRetainsPreviousPartialId() async {
+        var createAttempts = 0
+        var secondAttachAttempts = 0
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, arguments, _ in
+                if arguments.contains("read") {
+                    return .success(Self.result(stdout: """
+                    {
+                      "project_id": "p_123",
+                      "path": "/repo/z/tasks.md",
+                      "content": "- [ ] First task\\n- [ ] Second task\\n",
+                      "hash": "hash-1",
+                      "mtime": "2026-05-26T00:00:00Z",
+                      "warning": null
+                    }
+                    """))
+                }
+                if arguments.contains("create") {
+                    createAttempts += 1
+                    return .success(Self.result(stdout: """
+                    {
+                      "work_execution_id": "we_\(createAttempts)",
+                      "branch_name": "ccx/we_\(createAttempts)/build",
+                      "worktree_path": "/worktrees/we_\(createAttempts)",
+                      "task_file_path": "/work-executions/we_\(createAttempts)/task.md"
+                    }
+                    """))
+                }
+                if arguments.contains("attach") {
+                    if createAttempts == 1 {
+                        return .success(CCXControllerCLIProcessResult(
+                            exitCode: 1,
+                            stdout: Data(),
+                            stderr: Data("attach failed".utf8)
+                        ))
+                    }
+                    secondAttachAttempts += 1
+                    if secondAttachAttempts == 1 {
+                        return .success(CCXControllerCLIProcessResult(
+                            exitCode: 1,
+                            stdout: Data(),
+                            stderr: Data("attach failed".utf8)
+                        ))
+                    }
+                    return .success(Self.result(stdout: """
+                    {
+                      "agent_session_id": "sess_worker",
+                      "work_execution_id": "we_2",
+                      "role": "worker",
+                      "mode": "writer",
+                      "status": "attached"
+                    }
+                    """))
+                }
+                return .success(Self.result(stdout: """
+                {
+                  "session_id": "sess_worker",
+                  "status": "sent"
+                }
+                """))
+            })
+        }
+
+        await store.load()
+        store.selectedWorkItemCandidateId = store.workItemCandidates[0].id
+        await store.createWorkExecutionFromSelection(project: Self.project)
+        XCTAssertTrue(store.workCreateStatusMessage?.contains("we_1") ?? false)
+
+        store.selectedWorkItemCandidateId = store.workItemCandidates[1].id
+        await store.createWorkExecutionFromSelection(project: Self.project)
+
+        XCTAssertEqual(createAttempts, 2)
+        XCTAssertEqual(store.lastCreatedWorkExecutionId, "we_2")
+        XCTAssertTrue(store.workCreateStatusMessage?.contains("we_1") ?? false)
+        XCTAssertTrue(store.workCreateStatusMessage?.contains("we_2") ?? false)
+        XCTAssertNotNil(store.workCreateErrorMessage)
+
+        await store.createWorkExecutionFromSelection(project: Self.project)
+
+        XCTAssertEqual(createAttempts, 2)
+        XCTAssertEqual(store.lastCreatedWorkExecutionId, "we_2")
+        XCTAssertFalse(store.workCreateStatusMessage?.contains("we_1") ?? false)
+        XCTAssertNil(store.workCreateErrorMessage)
+    }
+
+    func testCreateWorkExecutionClearsRetainedStatusWhenSnapshotDropsPendingCandidate() async {
+        var readAttempts = 0
+        var createAttempts = 0
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, arguments, _ in
+                if arguments.contains("read") {
+                    readAttempts += 1
+                    let content = readAttempts == 1
+                        ? "- [ ] First task\\n- [ ] Second task\\n"
+                        : "- [ ] Second task\\n"
+                    return .success(Self.result(stdout: """
+                    {
+                      "project_id": "p_123",
+                      "path": "/repo/z/tasks.md",
+                      "content": "\(content)",
+                      "hash": "hash-\(readAttempts)",
+                      "mtime": "2026-05-26T00:00:00Z",
+                      "warning": null
+                    }
+                    """))
+                }
+                if arguments.contains("create") {
+                    createAttempts += 1
+                    return .success(Self.result(stdout: """
+                    {
+                      "work_execution_id": "we_\(createAttempts)",
+                      "branch_name": "ccx/we_\(createAttempts)/build",
+                      "worktree_path": "/worktrees/we_\(createAttempts)",
+                      "task_file_path": "/work-executions/we_\(createAttempts)/task.md"
+                    }
+                    """))
+                }
+                if arguments.contains("attach") {
+                    return .success(CCXControllerCLIProcessResult(
+                        exitCode: 1,
+                        stdout: Data(),
+                        stderr: Data("attach failed".utf8)
+                    ))
+                }
+                return .success(Self.result(stdout: """
+                {
+                  "session_id": "sess_worker",
+                  "status": "sent"
+                }
+                """))
+            })
+        }
+
+        await store.load()
+        store.selectedWorkItemCandidateId = store.workItemCandidates[0].id
+        await store.createWorkExecutionFromSelection(project: Self.project)
+        let secondCandidateId = store.workItemCandidates[1].id
+        store.selectedWorkItemCandidateId = secondCandidateId
+        await store.createWorkExecutionFromSelection(project: Self.project)
+        XCTAssertTrue(store.workCreateStatusMessage?.contains("we_1") ?? false)
+        XCTAssertTrue(store.workCreateStatusMessage?.contains("we_2") ?? false)
+
+        await store.load()
+        store.selectedWorkItemCandidateId = secondCandidateId
+        await store.createWorkExecutionFromSelection(project: Self.project)
+
+        XCTAssertEqual(createAttempts, 2)
+        XCTAssertFalse(store.workCreateStatusMessage?.contains("we_1") ?? false)
+        XCTAssertTrue(store.workCreateStatusMessage?.contains("we_2") ?? false)
+        XCTAssertNotNil(store.workCreateErrorMessage)
+    }
+
+    func testCreateWorkExecutionKeepsPendingRetryThroughUnsavedDraftRemoval() async {
+        var createAttempts = 0
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, arguments, _ in
+                if arguments.contains("read") {
+                    return .success(Self.result(stdout: """
+                    {
+                      "project_id": "p_123",
+                      "path": "/repo/z/tasks.md",
+                      "content": "- [ ] Build create flow\\n",
+                      "hash": "hash-1",
+                      "mtime": "2026-05-26T00:00:00Z",
+                      "warning": null
+                    }
+                    """))
+                }
+                if arguments.contains("create") {
+                    createAttempts += 1
+                    return .success(Self.result(stdout: """
+                    {
+                      "work_execution_id": "we_\(createAttempts)",
+                      "branch_name": "ccx/we_\(createAttempts)/build",
+                      "worktree_path": "/worktrees/we_\(createAttempts)",
+                      "task_file_path": "/work-executions/we_\(createAttempts)/task.md"
+                    }
+                    """))
+                }
+                if arguments.contains("attach") {
+                    return .success(CCXControllerCLIProcessResult(
+                        exitCode: 1,
+                        stdout: Data(),
+                        stderr: Data("attach failed".utf8)
+                    ))
+                }
+                return .success(Self.result(stdout: """
+                {
+                  "session_id": "sess_worker",
+                  "status": "sent"
+                }
+                """))
+            })
+        }
+
+        await store.load()
+        store.selectedWorkItemCandidateId = store.workItemCandidates[0].id
+        await store.createWorkExecutionFromSelection(project: Self.project)
+
+        store.draftContent = "# Temporary removal\n"
+        for _ in 0..<20 {
+            if store.workItemCandidates.first?.displayText == "Temporary removal" { break }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(store.workItemCandidates.first?.displayText, "Temporary removal")
+
+        store.discardChanges()
+        for _ in 0..<20 {
+            if store.workItemCandidates.first?.displayText == "Build create flow" { break }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        store.selectedWorkItemCandidateId = store.workItemCandidates[0].id
+        await store.createWorkExecutionFromSelection(project: Self.project)
+
+        XCTAssertEqual(createAttempts, 1)
+        XCTAssertEqual(store.lastCreatedWorkExecutionId, "we_1")
+        XCTAssertTrue(store.workCreateStatusMessage?.contains("we_1") ?? false)
+        XCTAssertNotNil(store.workCreateErrorMessage)
+    }
+
+    func testCreateWorkExecutionRemapsPendingWhenDuplicateCandidateShiftsOnSave() async {
+        var createAttempts = 0
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, arguments, _ in
+                if arguments.contains("read") {
+                    return .success(Self.result(stdout: """
+                    {
+                      "project_id": "p_123",
+                      "path": "/repo/z/tasks.md",
+                      "content": "- [ ] Duplicate task\\n- [ ] Duplicate task\\n",
+                      "hash": "hash-1",
+                      "mtime": "2026-05-26T00:00:00Z",
+                      "warning": null
+                    }
+                    """))
+                }
+                if arguments.contains("write") {
+                    return .success(Self.result(stdout: """
+                    {
+                      "project_id": "p_123",
+                      "path": "/repo/z/tasks.md",
+                      "hash": "hash-2",
+                      "mtime": "2026-05-26T00:00:01Z",
+                      "bytes_written": 21,
+                      "warning": null
+                    }
+                    """))
+                }
+                if arguments.contains("create") {
+                    createAttempts += 1
+                    return .success(Self.result(stdout: """
+                    {
+                      "work_execution_id": "we_\(createAttempts)",
+                      "branch_name": "ccx/we_\(createAttempts)/build",
+                      "worktree_path": "/worktrees/we_\(createAttempts)",
+                      "task_file_path": "/work-executions/we_\(createAttempts)/task.md"
+                    }
+                    """))
+                }
+                if arguments.contains("attach") {
+                    return .success(CCXControllerCLIProcessResult(
+                        exitCode: 1,
+                        stdout: Data(),
+                        stderr: Data("attach failed".utf8)
+                    ))
+                }
+                return .success(Self.result(stdout: """
+                {
+                  "session_id": "sess_worker",
+                  "status": "sent"
+                }
+                """))
+            })
+        }
+
+        await store.load()
+        store.selectedWorkItemCandidateId = store.workItemCandidates[1].id
+        await store.createWorkExecutionFromSelection(project: Self.project)
+        store.draftContent = "- [ ] Duplicate task\n"
+        await store.save()
+        store.selectedWorkItemCandidateId = store.workItemCandidates[0].id
+        await store.createWorkExecutionFromSelection(project: Self.project)
+
+        XCTAssertEqual(createAttempts, 1)
+        XCTAssertTrue(store.workCreateStatusMessage?.contains("we_1") ?? false)
+        XCTAssertNotNil(store.workCreateErrorMessage)
+    }
+
+    func testCreateWorkExecutionSelectionChangeCanRetryPreviousPartial() async {
+        var createAttempts = 0
+        var firstAttachAttempts = 0
+        var secondAttachAttempts = 0
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, arguments, _ in
+                if arguments.contains("read") {
+                    return .success(Self.result(stdout: """
+                    {
+                      "project_id": "p_123",
+                      "path": "/repo/z/tasks.md",
+                      "content": "- [ ] First task\\n- [ ] Second task\\n",
+                      "hash": "hash-1",
+                      "mtime": "2026-05-26T00:00:00Z",
+                      "warning": null
+                    }
+                    """))
+                }
+                if arguments.contains("create") {
+                    createAttempts += 1
+                    return .success(Self.result(stdout: """
+                    {
+                      "work_execution_id": "we_\(createAttempts)",
+                      "branch_name": "ccx/we_\(createAttempts)/build",
+                      "worktree_path": "/worktrees/we_\(createAttempts)",
+                      "task_file_path": "/work-executions/we_\(createAttempts)/task.md"
+                    }
+                    """))
+                }
+                if arguments.contains("attach") {
+                    if arguments.contains("we_1") {
+                        firstAttachAttempts += 1
+                        if firstAttachAttempts == 1 {
+                            return .success(CCXControllerCLIProcessResult(
+                                exitCode: 1,
+                                stdout: Data(),
+                                stderr: Data("attach failed".utf8)
+                            ))
+                        }
+                        return .success(Self.result(stdout: """
+                        {
+                          "agent_session_id": "sess_worker_1",
+                          "work_execution_id": "we_1",
+                          "role": "worker",
+                          "mode": "writer",
+                          "status": "attached"
+                        }
+                        """))
+                    }
+                    secondAttachAttempts += 1
+                    return .success(CCXControllerCLIProcessResult(
+                        exitCode: 1,
+                        stdout: Data(),
+                        stderr: Data("attach failed".utf8)
+                    ))
+                }
+                return .success(Self.result(stdout: """
+                {
+                  "session_id": "sess_worker",
+                  "status": "sent"
+                }
+                """))
+            })
+        }
+
+        await store.load()
+        store.selectedWorkItemCandidateId = store.workItemCandidates[0].id
+        await store.createWorkExecutionFromSelection(project: Self.project)
+        store.selectedWorkItemCandidateId = store.workItemCandidates[1].id
+        await store.createWorkExecutionFromSelection(project: Self.project)
+        store.selectedWorkItemCandidateId = store.workItemCandidates[0].id
+        await store.createWorkExecutionFromSelection(project: Self.project)
+
+        XCTAssertEqual(createAttempts, 2)
+        XCTAssertEqual(firstAttachAttempts, 2)
+        XCTAssertEqual(secondAttachAttempts, 1)
+        XCTAssertNil(store.workCreateErrorMessage)
     }
 
     private static func cli(
