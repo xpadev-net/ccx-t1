@@ -405,16 +405,11 @@ final class CCXTaskSourceStore {
     private func apply(snapshot: CCXTaskSourceSnapshot) async {
         self.snapshot = snapshot
         _draftContent = snapshot.content
-        workItemCandidatesParseTask?.cancel()
-        workItemCandidatesParseTask = nil
+        let parseTask = scheduleWorkItemCandidateParse(for: snapshot.content, prunePendingAttempts: true)
         guard !Task.isCancelled else {
-            scheduleWorkItemCandidateParse(for: snapshot.content, prunePendingAttempts: true)
             return
         }
-        let parseTask = Task.detached(priority: .userInitiated) {
-            CCXWorkItemCandidateParser.parse(snapshot.content)
-        }
-        let candidates = await withTaskCancellationHandler {
+        await withTaskCancellationHandler {
             await parseTask.value
         } onCancel: {
             parseTask.cancel()
@@ -423,12 +418,15 @@ final class CCXTaskSourceStore {
             scheduleWorkItemCandidateParse(for: snapshot.content, prunePendingAttempts: true)
             return
         }
-        updateWorkItemCandidates(candidates, for: snapshot.content, prunePendingAttempts: true)
     }
 
-    private func scheduleWorkItemCandidateParse(for markdown: String, prunePendingAttempts: Bool = false) {
+    @discardableResult
+    private func scheduleWorkItemCandidateParse(
+        for markdown: String,
+        prunePendingAttempts: Bool = false
+    ) -> Task<Void, Never> {
         workItemCandidatesParseTask?.cancel()
-        workItemCandidatesParseTask = Task { [weak self, markdown, prunePendingAttempts] in
+        let task = Task { [weak self, markdown, prunePendingAttempts] in
             let parseTask = Task.detached(priority: .userInitiated) {
                 CCXWorkItemCandidateParser.parse(markdown)
             }
@@ -440,6 +438,8 @@ final class CCXTaskSourceStore {
             guard !Task.isCancelled else { return }
             self?.updateWorkItemCandidates(candidates, for: markdown, prunePendingAttempts: prunePendingAttempts)
         }
+        workItemCandidatesParseTask = task
+        return task
     }
 
     private func updateWorkItemCandidates(
