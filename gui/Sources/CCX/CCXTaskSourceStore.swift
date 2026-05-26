@@ -7,10 +7,12 @@ final class CCXTaskSourceStore {
     typealias CLIProvider = () -> Result<CCXControllerCLI, CCXControllerCLIError>
 
     private(set) var snapshot: CCXTaskSourceSnapshot?
-    var draftContent = "" {
-        didSet {
-            guard !isSettingDraftContentWithoutSchedulingParse else { return }
-            scheduleWorkItemCandidateParse(for: draftContent)
+    private var _draftContent = ""
+    var draftContent: String {
+        get { _draftContent }
+        set {
+            _draftContent = newValue
+            scheduleWorkItemCandidateParse(for: newValue)
         }
     }
     private(set) var isLoading = false
@@ -42,8 +44,6 @@ final class CCXTaskSourceStore {
     private let cliProvider: CLIProvider
     @ObservationIgnored
     private var workItemCandidatesParseTask: Task<Void, Never>?
-    @ObservationIgnored
-    private var isSettingDraftContentWithoutSchedulingParse = false
 
     private struct PendingWorkCreateAttempt {
         var result: CCXWorkCreateResult
@@ -406,8 +406,11 @@ final class CCXTaskSourceStore {
 
     private func apply(snapshot: CCXTaskSourceSnapshot) async {
         self.snapshot = snapshot
-        setDraftContentWithoutSchedulingParse(snapshot.content)
-        guard !Task.isCancelled else { return }
+        _draftContent = snapshot.content
+        guard !Task.isCancelled else {
+            scheduleWorkItemCandidateParse(for: snapshot.content, prunePendingAttempts: true)
+            return
+        }
         let parseTask = Task.detached(priority: .userInitiated) {
             CCXWorkItemCandidateParser.parse(snapshot.content)
         }
@@ -416,19 +419,16 @@ final class CCXTaskSourceStore {
         } onCancel: {
             parseTask.cancel()
         }
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled else {
+            scheduleWorkItemCandidateParse(for: snapshot.content, prunePendingAttempts: true)
+            return
+        }
         updateWorkItemCandidates(candidates, for: snapshot.content, prunePendingAttempts: true)
     }
 
-    private func setDraftContentWithoutSchedulingParse(_ content: String) {
-        isSettingDraftContentWithoutSchedulingParse = true
-        draftContent = content
-        isSettingDraftContentWithoutSchedulingParse = false
-    }
-
-    private func scheduleWorkItemCandidateParse(for markdown: String) {
+    private func scheduleWorkItemCandidateParse(for markdown: String, prunePendingAttempts: Bool = false) {
         workItemCandidatesParseTask?.cancel()
-        workItemCandidatesParseTask = Task { [weak self, markdown] in
+        workItemCandidatesParseTask = Task { [weak self, markdown, prunePendingAttempts] in
             let parseTask = Task.detached(priority: .userInitiated) {
                 CCXWorkItemCandidateParser.parse(markdown)
             }
@@ -438,7 +438,7 @@ final class CCXTaskSourceStore {
                 parseTask.cancel()
             }
             guard !Task.isCancelled else { return }
-            self?.updateWorkItemCandidates(candidates, for: markdown)
+            self?.updateWorkItemCandidates(candidates, for: markdown, prunePendingAttempts: prunePendingAttempts)
         }
     }
 
