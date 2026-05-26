@@ -408,6 +408,10 @@ final class CCXTaskSourceStore {
         self.snapshot = snapshot
         setDraftContentWithoutSchedulingParse(snapshot.content)
         let candidates = Self.workItemCandidates(in: snapshot.content)
+        guard !Task.isCancelled else {
+            scheduleWorkItemCandidateParse(for: snapshot.content)
+            return
+        }
         discardPendingWorkCreateAttemptsMissing(from: candidates)
         updateWorkItemCandidates(candidates, for: snapshot.content)
     }
