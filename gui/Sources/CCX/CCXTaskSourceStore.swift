@@ -445,9 +445,9 @@ final class CCXTaskSourceStore {
         for markdown: String,
         prunePendingAttempts: Bool = false
     ) {
+        guard draftContent == markdown else { return }
         workItemCandidatesParseTask?.cancel()
         workItemCandidatesParseTask = nil
-        guard draftContent == markdown else { return }
         if prunePendingAttempts {
             discardPendingWorkCreateAttemptsMissing(from: candidates)
         }
