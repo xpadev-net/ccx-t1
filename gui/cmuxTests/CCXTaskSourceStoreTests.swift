@@ -675,6 +675,17 @@ final class CCXTaskSourceStoreTests: XCTestCase {
         XCTAssertEqual(candidates[1].selectorValue, "L2:- [ ] Build create flow")
     }
 
+    func testWorkItemCandidatesIgnoreHashtagLines() {
+        let candidates = CCXTaskSourceStore.workItemCandidates(in: """
+        #42-follow-up
+        #important
+        # Valid heading
+        ###
+        """)
+
+        XCTAssertEqual(candidates.map(\.displayText), ["Valid heading"])
+    }
+
     func testCreateWorkExecutionCreatesAttachesAndPromptsWorker() async {
         var calls: [[String]] = []
         var promptedMessage: String?

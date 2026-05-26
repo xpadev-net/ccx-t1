@@ -20,7 +20,9 @@ enum CCXWorkItemCandidateParser {
             lineNumber += 1
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.hasPrefix("#") {
-                let title = trimmed.drop { $0 == "#" }.trimmingCharacters(in: .whitespacesAndNewlines)
+                let rest = trimmed.drop { $0 == "#" }
+                guard rest.isEmpty || rest.first?.isWhitespace == true else { return }
+                let title = rest.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !title.isEmpty else { return }
                 let occurrence = nextOccurrence(
                     selectorType: "heading",
