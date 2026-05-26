@@ -902,6 +902,7 @@ final class CCXTaskSourceStoreTests: XCTestCase {
 
     func testCreateWorkExecutionSelectionChangeRetainsPreviousPartialId() async {
         var createAttempts = 0
+        var secondAttachAttempts = 0
         let store = CCXTaskSourceStore(projectId: "p_123") {
             .success(Self.cli { _, arguments, _ in
                 if arguments.contains("read") {
@@ -929,6 +930,14 @@ final class CCXTaskSourceStoreTests: XCTestCase {
                 }
                 if arguments.contains("attach") {
                     if createAttempts == 1 {
+                        return .success(CCXControllerCLIProcessResult(
+                            exitCode: 1,
+                            stdout: Data(),
+                            stderr: Data("attach failed".utf8)
+                        ))
+                    }
+                    secondAttachAttempts += 1
+                    if secondAttachAttempts == 1 {
                         return .success(CCXControllerCLIProcessResult(
                             exitCode: 1,
                             stdout: Data(),
@@ -965,6 +974,14 @@ final class CCXTaskSourceStoreTests: XCTestCase {
         XCTAssertEqual(createAttempts, 2)
         XCTAssertEqual(store.lastCreatedWorkExecutionId, "we_2")
         XCTAssertTrue(store.workCreateStatusMessage?.contains("we_1") ?? false)
+        XCTAssertTrue(store.workCreateStatusMessage?.contains("we_2") ?? false)
+        XCTAssertNotNil(store.workCreateErrorMessage)
+
+        await store.createWorkExecutionFromSelection(project: Self.project)
+
+        XCTAssertEqual(createAttempts, 2)
+        XCTAssertEqual(store.lastCreatedWorkExecutionId, "we_2")
+        XCTAssertFalse(store.workCreateStatusMessage?.contains("we_1") ?? false)
         XCTAssertNil(store.workCreateErrorMessage)
     }
 
