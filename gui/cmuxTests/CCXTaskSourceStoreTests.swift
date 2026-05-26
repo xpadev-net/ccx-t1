@@ -1358,7 +1358,7 @@ final class CCXTaskSourceStoreTests: XCTestCase {
         XCTAssertNotNil(store.workCreateErrorMessage)
     }
 
-    func testCreateWorkExecutionRecreatesWhenDuplicateCandidateShiftsOnSave() async {
+    func testCreateWorkExecutionRemapsPendingWhenDuplicateCandidateShiftsOnSave() async {
         var createAttempts = 0
         let store = CCXTaskSourceStore(projectId: "p_123") {
             .success(Self.cli { _, arguments, _ in
@@ -1421,9 +1421,8 @@ final class CCXTaskSourceStoreTests: XCTestCase {
         store.selectedWorkItemCandidateId = store.workItemCandidates[0].id
         await store.createWorkExecutionFromSelection(project: Self.project)
 
-        XCTAssertEqual(createAttempts, 2)
-        XCTAssertEqual(store.lastCreatedWorkExecutionId, "we_2")
-        XCTAssertTrue(store.workCreateStatusMessage?.contains("we_2") ?? false)
+        XCTAssertEqual(createAttempts, 1)
+        XCTAssertTrue(store.workCreateStatusMessage?.contains("we_1") ?? false)
         XCTAssertNotNil(store.workCreateErrorMessage)
     }
 

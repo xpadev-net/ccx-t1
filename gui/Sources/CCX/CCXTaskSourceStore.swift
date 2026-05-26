@@ -54,12 +54,10 @@ final class CCXTaskSourceStore {
     private struct WorkItemCandidateSignature: Hashable {
         let selectorType: String
         let displayText: String
-        let candidateId: String
 
         init(candidate: CCXTaskSourceWorkItemCandidate) {
             self.selectorType = candidate.selectorType
             self.displayText = candidate.displayText
-            self.candidateId = candidate.id
         }
     }
 
