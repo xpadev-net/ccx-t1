@@ -429,7 +429,11 @@ final class CCXTaskSourceStore {
 
     private func discardPendingWorkCreateAttemptsMissing(from candidates: [CCXTaskSourceWorkItemCandidate]) {
         let candidateIds = Set(candidates.map(\.id))
+        let previousCount = pendingWorkCreateAttempts.count
         pendingWorkCreateAttempts = pendingWorkCreateAttempts.filter { candidateIds.contains($0.key) }
+        if pendingWorkCreateAttempts.count != previousCount {
+            retainedPartialWorkCreateStatusMessages = []
+        }
     }
 
     private func retainPendingWorkCreateStatusIfChangingSelection(to candidate: CCXTaskSourceWorkItemCandidate) {
