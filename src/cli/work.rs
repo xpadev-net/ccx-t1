@@ -271,7 +271,9 @@ fn cleanup_create_artifacts(
     execution_dir: &Utf8Path,
 ) {
     let worktree_exists = worktree.exists();
-    let worktree_removed = if test_fail_cleanup_remove_worktree() && worktree_exists {
+    let worktree_removed = if !worktree_exists {
+        true
+    } else if test_fail_cleanup_remove_worktree() {
         false
     } else {
         remove_worktree(repo, worktree).is_ok()

@@ -45,6 +45,17 @@ final class CCXTaskSourceStore {
     private struct PendingWorkCreateAttempt {
         var result: CCXWorkCreateResult
         var workerSessionId: String?
+        var signature: WorkItemCandidateSignature
+    }
+
+    private struct WorkItemCandidateSignature: Hashable {
+        let selectorType: String
+        let displayText: String
+
+        init(candidate: CCXTaskSourceWorkItemCandidate) {
+            self.selectorType = candidate.selectorType
+            self.displayText = candidate.displayText
+        }
     }
 
     init(
@@ -205,7 +216,8 @@ final class CCXTaskSourceStore {
                 )
                 pendingWorkCreateAttempts[candidate.id] = PendingWorkCreateAttempt(
                     result: created,
-                    workerSessionId: nil
+                    workerSessionId: nil,
+                    signature: WorkItemCandidateSignature(candidate: candidate)
                 )
                 lastCreatedWorkExecutionId = created.workExecutionId
             }
@@ -273,7 +285,9 @@ final class CCXTaskSourceStore {
                 mtime: result.mtime,
                 warning: result.warning
             )
-            updateWorkItemCandidates(Self.workItemCandidates(in: draftContent), for: draftContent)
+            let candidates = Self.workItemCandidates(in: draftContent)
+            discardPendingWorkCreateAttemptsMissing(from: candidates)
+            updateWorkItemCandidates(candidates, for: draftContent)
             sourceChangeMessage = nil
         } catch {
             if Self.isConflict(error) {
@@ -430,7 +444,23 @@ final class CCXTaskSourceStore {
     private func discardPendingWorkCreateAttemptsMissing(from candidates: [CCXTaskSourceWorkItemCandidate]) {
         let candidateIds = Set(candidates.map(\.id))
         let previousCount = pendingWorkCreateAttempts.count
-        pendingWorkCreateAttempts = pendingWorkCreateAttempts.filter { candidateIds.contains($0.key) }
+        var updatedAttempts: [String: PendingWorkCreateAttempt] = [:]
+        var usedCandidateIds = Set<String>()
+        for (candidateId, pendingAttempt) in pendingWorkCreateAttempts {
+            if candidateIds.contains(candidateId) {
+                updatedAttempts[candidateId] = pendingAttempt
+                usedCandidateIds.insert(candidateId)
+                continue
+            }
+            if let remappedCandidate = candidates.first(where: {
+                !usedCandidateIds.contains($0.id)
+                    && WorkItemCandidateSignature(candidate: $0) == pendingAttempt.signature
+            }) {
+                updatedAttempts[remappedCandidate.id] = pendingAttempt
+                usedCandidateIds.insert(remappedCandidate.id)
+            }
+        }
+        pendingWorkCreateAttempts = updatedAttempts
         if pendingWorkCreateAttempts.count != previousCount {
             retainedPartialWorkCreateStatusMessages = []
         }
