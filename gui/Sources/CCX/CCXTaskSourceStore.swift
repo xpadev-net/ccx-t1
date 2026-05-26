@@ -9,6 +9,7 @@ final class CCXTaskSourceStore {
     private(set) var snapshot: CCXTaskSourceSnapshot?
     var draftContent = "" {
         didSet {
+            guard !isSettingDraftContentWithoutSchedulingParse else { return }
             scheduleWorkItemCandidateParse(for: draftContent)
         }
     }
@@ -41,6 +42,8 @@ final class CCXTaskSourceStore {
     private let cliProvider: CLIProvider
     @ObservationIgnored
     private var workItemCandidatesParseTask: Task<Void, Never>?
+    @ObservationIgnored
+    private var isSettingDraftContentWithoutSchedulingParse = false
 
     private struct PendingWorkCreateAttempt {
         var result: CCXWorkCreateResult
@@ -403,10 +406,16 @@ final class CCXTaskSourceStore {
 
     private func apply(snapshot: CCXTaskSourceSnapshot) {
         self.snapshot = snapshot
-        self.draftContent = snapshot.content
+        setDraftContentWithoutSchedulingParse(snapshot.content)
         let candidates = Self.workItemCandidates(in: snapshot.content)
         discardPendingWorkCreateAttemptsMissing(from: candidates)
         updateWorkItemCandidates(candidates, for: snapshot.content)
+    }
+
+    private func setDraftContentWithoutSchedulingParse(_ content: String) {
+        isSettingDraftContentWithoutSchedulingParse = true
+        draftContent = content
+        isSettingDraftContentWithoutSchedulingParse = false
     }
 
     private func scheduleWorkItemCandidateParse(for markdown: String) {

@@ -142,7 +142,12 @@ pub fn create(args: CreateArgs) -> Result<(), CcxError> {
                 );
                 return Err(error);
             }
-            EventBatchAppendError::Indeterminate(error) => return Err(error),
+            EventBatchAppendError::Indeterminate(error) => {
+                // The event log may already contain authoritative rows, while rollback failed.
+                // Leave artifacts in place for manual recovery instead of deleting paths that
+                // the projector may now reference.
+                return Err(error);
+            }
         }
     }
 
