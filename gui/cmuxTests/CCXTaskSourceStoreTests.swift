@@ -217,7 +217,7 @@ final class CCXTaskSourceStoreTests: XCTestCase {
     }
 
     func testOrchestratorPromptIncludesProjectStateFormatAndOriginalRequest() {
-        let prompt = CCXTaskSourceStore.orchestratorPrompt(
+        let prompt = CCXTaskComposerSupport.prompt(
             request: "Add export support",
             project: Self.project,
             workExecutions: [
