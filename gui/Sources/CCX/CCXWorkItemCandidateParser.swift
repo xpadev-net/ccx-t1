@@ -12,7 +12,11 @@ enum CCXWorkItemCandidateParser {
         var occurrenceCounts: [String: Int] = [:]
         var candidates: [CCXTaskSourceWorkItemCandidate] = []
         var lineNumber = 0
-        markdown.enumerateLines { line, _ in
+        markdown.enumerateLines { line, stop in
+            guard !Task.isCancelled else {
+                stop = true
+                return
+            }
             lineNumber += 1
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.hasPrefix("#") {
