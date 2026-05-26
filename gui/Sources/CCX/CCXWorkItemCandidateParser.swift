@@ -11,13 +11,13 @@ enum CCXWorkItemCandidateParser {
     static func parse(_ markdown: String) -> [CCXTaskSourceWorkItemCandidate] {
         var occurrenceCounts: [String: Int] = [:]
         var candidates: [CCXTaskSourceWorkItemCandidate] = []
-        for (index, rawLine) in markdown.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
-            let lineNumber = index + 1
-            let line = String(rawLine)
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+        var lineNumber = 0
+        markdown.enumerateLines { line, _ in
+            lineNumber += 1
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.hasPrefix("#") {
-                let title = trimmed.drop { $0 == "#" }.trimmingCharacters(in: .whitespaces)
-                guard !title.isEmpty else { continue }
+                let title = trimmed.drop { $0 == "#" }.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !title.isEmpty else { return }
                 let occurrence = nextOccurrence(
                     selectorType: "heading",
                     displayText: title,
@@ -29,11 +29,11 @@ enum CCXWorkItemCandidateParser {
                     selectorValue: "L\(lineNumber):\(title)",
                     displayText: title
                 ))
-                continue
+                return
             }
             if trimmed.hasPrefix("- [ ]") || trimmed.hasPrefix("* [ ]") {
-                let title = trimmed.dropFirst(5).trimmingCharacters(in: .whitespaces)
-                guard !title.isEmpty else { continue }
+                let title = trimmed.dropFirst(5).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !title.isEmpty else { return }
                 let occurrence = nextOccurrence(
                     selectorType: "checkbox",
                     displayText: title,
@@ -62,19 +62,10 @@ enum CCXWorkItemCandidateParser {
     }
 
     private static func stableId(selectorType: String, displayText: String, occurrence: Int) -> String {
-        "\(selectorType)-\(stableHash(normalizedText(displayText)))-\(occurrence)"
+        "\(selectorType)-\(normalizedText(displayText))-\(occurrence)"
     }
 
     private static func normalizedText(_ text: String) -> String {
         text.lowercased().split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
-    }
-
-    private static func stableHash(_ text: String) -> String {
-        var hash: UInt64 = 14_695_981_039_346_656_037
-        for byte in text.utf8 {
-            hash ^= UInt64(byte)
-            hash &*= 1_099_511_628_211
-        }
-        return String(hash, radix: 16)
     }
 }

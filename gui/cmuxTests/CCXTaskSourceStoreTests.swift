@@ -664,6 +664,17 @@ final class CCXTaskSourceStoreTests: XCTestCase {
         XCTAssertEqual(candidates[1].selectorValue, "L3:- [ ] Build create flow")
     }
 
+    func testWorkItemCandidatesTrimCRLFAndUseTextStableIds() {
+        let candidates = CCXTaskSourceStore.workItemCandidates(in: "# Phase 1\r\n- [ ] Build create flow\r\n")
+
+        XCTAssertEqual(candidates.map(\.displayText), ["Phase 1", "Build create flow"])
+        XCTAssertEqual(candidates.map(\.id), [
+            "heading-phase 1-1",
+            "checkbox-build create flow-1",
+        ])
+        XCTAssertEqual(candidates[1].selectorValue, "L2:- [ ] Build create flow")
+    }
+
     func testCreateWorkExecutionCreatesAttachesAndPromptsWorker() async {
         var calls: [[String]] = []
         var promptedMessage: String?
@@ -982,6 +993,85 @@ final class CCXTaskSourceStoreTests: XCTestCase {
         XCTAssertEqual(createAttempts, 2)
         XCTAssertEqual(store.lastCreatedWorkExecutionId, "we_2")
         XCTAssertFalse(store.workCreateStatusMessage?.contains("we_1") ?? false)
+        XCTAssertNil(store.workCreateErrorMessage)
+    }
+
+    func testCreateWorkExecutionSelectionChangeCanRetryPreviousPartial() async {
+        var createAttempts = 0
+        var firstAttachAttempts = 0
+        var secondAttachAttempts = 0
+        let store = CCXTaskSourceStore(projectId: "p_123") {
+            .success(Self.cli { _, arguments, _ in
+                if arguments.contains("read") {
+                    return .success(Self.result(stdout: """
+                    {
+                      "project_id": "p_123",
+                      "path": "/repo/z/tasks.md",
+                      "content": "- [ ] First task\\n- [ ] Second task\\n",
+                      "hash": "hash-1",
+                      "mtime": "2026-05-26T00:00:00Z",
+                      "warning": null
+                    }
+                    """))
+                }
+                if arguments.contains("create") {
+                    createAttempts += 1
+                    return .success(Self.result(stdout: """
+                    {
+                      "work_execution_id": "we_\(createAttempts)",
+                      "branch_name": "ccx/we_\(createAttempts)/build",
+                      "worktree_path": "/worktrees/we_\(createAttempts)",
+                      "task_file_path": "/work-executions/we_\(createAttempts)/task.md"
+                    }
+                    """))
+                }
+                if arguments.contains("attach") {
+                    if arguments.contains("we_1") {
+                        firstAttachAttempts += 1
+                        if firstAttachAttempts == 1 {
+                            return .success(CCXControllerCLIProcessResult(
+                                exitCode: 1,
+                                stdout: Data(),
+                                stderr: Data("attach failed".utf8)
+                            ))
+                        }
+                        return .success(Self.result(stdout: """
+                        {
+                          "agent_session_id": "sess_worker_1",
+                          "work_execution_id": "we_1",
+                          "role": "worker",
+                          "mode": "writer",
+                          "status": "attached"
+                        }
+                        """))
+                    }
+                    secondAttachAttempts += 1
+                    return .success(CCXControllerCLIProcessResult(
+                        exitCode: 1,
+                        stdout: Data(),
+                        stderr: Data("attach failed".utf8)
+                    ))
+                }
+                return .success(Self.result(stdout: """
+                {
+                  "session_id": "sess_worker",
+                  "status": "sent"
+                }
+                """))
+            })
+        }
+
+        await store.load()
+        store.selectedWorkItemCandidateId = store.workItemCandidates[0].id
+        await store.createWorkExecutionFromSelection(project: Self.project)
+        store.selectedWorkItemCandidateId = store.workItemCandidates[1].id
+        await store.createWorkExecutionFromSelection(project: Self.project)
+        store.selectedWorkItemCandidateId = store.workItemCandidates[0].id
+        await store.createWorkExecutionFromSelection(project: Self.project)
+
+        XCTAssertEqual(createAttempts, 2)
+        XCTAssertEqual(firstAttachAttempts, 2)
+        XCTAssertEqual(secondAttachAttempts, 1)
         XCTAssertNil(store.workCreateErrorMessage)
     }
 

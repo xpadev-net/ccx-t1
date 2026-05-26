@@ -206,7 +206,7 @@ fn render_task_md(input: &TaskMdInput<'_>) -> Result<String, CcxError> {
         head_commit: None,
         gh_review_hook_exit_code: None,
         current_writer_session_id: None,
-        updated_by: "orchestrator",
+        updated_by: "controller",
         updated_at: input.updated_at,
     };
     let yaml = serde_yaml::to_string(&front_matter)?;

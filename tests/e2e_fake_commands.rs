@@ -527,6 +527,10 @@ fn work_create_materializes_execution_task_file_and_worktree() {
         parsed_front_matter["source_ref"].as_str(),
         Some("checkbox:L2:- [ ] Fix: crash #42")
     );
+    assert_eq!(
+        parsed_front_matter["updated_by"].as_str(),
+        Some("controller")
+    );
 
     let events_raw =
         std::fs::read_to_string(home.join("projects").join(&project_id).join("events.jsonl"))

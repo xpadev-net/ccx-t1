@@ -367,8 +367,8 @@ private struct CCXWorkCreateSection: View {
                     .foregroundStyle(.orange)
             }
 
-            if let status = sourceStore.workCreateStatusMessage {
-                Text(status)
+            if let statusMessage = sourceStore.workCreateStatusMessage {
+                Text(statusMessage)
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

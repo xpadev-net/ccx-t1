@@ -25,9 +25,7 @@ final class CCXTaskSourceStore {
     private(set) var workItemCandidates: [CCXTaskSourceWorkItemCandidate] = []
     private(set) var isCreatingWork = false
     private var pendingSourceChangeHash: String?
-    private var pendingWorkCreateSelectorValue: String?
-    private var pendingWorkCreateResult: CCXWorkCreateResult?
-    private var pendingWorkerSessionId: String?
+    private var pendingWorkCreateAttempts: [String: PendingWorkCreateAttempt] = [:]
     private var retainedPartialWorkCreateStatusMessages: [String] = []
     private(set) var lastCreatedWorkExecutionId: String?
     var composerInput = ""
@@ -43,6 +41,11 @@ final class CCXTaskSourceStore {
     private let cliProvider: CLIProvider
     @ObservationIgnored
     private var workItemCandidatesParseTask: Task<Void, Never>?
+
+    private struct PendingWorkCreateAttempt {
+        var result: CCXWorkCreateResult
+        var workerSessionId: String?
+    }
 
     init(
         projectId: String,
@@ -190,8 +193,8 @@ final class CCXTaskSourceStore {
         do {
             let cli = try cli()
             let created: CCXWorkCreateResult
-            if pendingWorkCreateSelectorValue == candidate.selectorValue, let pendingWorkCreateResult {
-                created = pendingWorkCreateResult
+            if let pendingAttempt = pendingWorkCreateAttempts[candidate.selectorValue] {
+                created = pendingAttempt.result
             } else {
                 created = try await cli.createWork(
                     projectId: project.projectId,
@@ -200,14 +203,15 @@ final class CCXTaskSourceStore {
                     selectorValue: candidate.selectorValue,
                     displayText: candidate.displayText
                 )
-                pendingWorkCreateSelectorValue = candidate.selectorValue
-                pendingWorkCreateResult = created
-                pendingWorkerSessionId = nil
+                pendingWorkCreateAttempts[candidate.selectorValue] = PendingWorkCreateAttempt(
+                    result: created,
+                    workerSessionId: nil
+                )
                 lastCreatedWorkExecutionId = created.workExecutionId
             }
 
             let sessionId: String
-            if let pendingWorkerSessionId {
+            if let pendingWorkerSessionId = pendingWorkCreateAttempts[candidate.selectorValue]?.workerSessionId {
                 sessionId = pendingWorkerSessionId
             } else {
                 do {
@@ -218,7 +222,7 @@ final class CCXTaskSourceStore {
                         mode: "writer"
                     )
                     sessionId = attached.agentSessionId
-                    pendingWorkerSessionId = sessionId
+                    pendingWorkCreateAttempts[candidate.selectorValue]?.workerSessionId = sessionId
                 } catch {
                     workCreateStatusMessage = combinedWorkCreateStatus(current: Self.workCreatePartialStatus(created: created))
                     workCreateErrorMessage = Self.workCreateAttachMessage(for: error)
@@ -237,9 +241,7 @@ final class CCXTaskSourceStore {
                 return
             }
 
-            pendingWorkCreateSelectorValue = nil
-            pendingWorkCreateResult = nil
-            pendingWorkerSessionId = nil
+            pendingWorkCreateAttempts[candidate.selectorValue] = nil
             retainedPartialWorkCreateStatusMessages = []
             workCreateStatusMessage = combinedWorkCreateStatus(current: String(
                 localized: "ccx.tasks.workCreate.sent",
@@ -419,15 +421,12 @@ final class CCXTaskSourceStore {
     }
 
     private func retainPendingWorkCreateStatusIfChangingSelection(to candidate: CCXTaskSourceWorkItemCandidate) {
-        guard pendingWorkCreateSelectorValue != candidate.selectorValue,
-              let pendingResult = pendingWorkCreateResult else { return }
-        let status = Self.workCreatePartialStatus(created: pendingResult)
-        if !retainedPartialWorkCreateStatusMessages.contains(status) {
-            retainedPartialWorkCreateStatusMessages.append(status)
+        for (selectorValue, pendingAttempt) in pendingWorkCreateAttempts where selectorValue != candidate.selectorValue {
+            let status = Self.workCreatePartialStatus(created: pendingAttempt.result)
+            if !retainedPartialWorkCreateStatusMessages.contains(status) {
+                retainedPartialWorkCreateStatusMessages.append(status)
+            }
         }
-        pendingWorkCreateSelectorValue = nil
-        pendingWorkCreateResult = nil
-        pendingWorkerSessionId = nil
     }
 
     private func combinedWorkCreateStatus(current: String?) -> String? {
