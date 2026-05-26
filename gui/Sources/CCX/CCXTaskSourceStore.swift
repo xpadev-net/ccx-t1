@@ -54,10 +54,12 @@ final class CCXTaskSourceStore {
     private struct WorkItemCandidateSignature: Hashable {
         let selectorType: String
         let displayText: String
+        let candidateId: String
 
         init(candidate: CCXTaskSourceWorkItemCandidate) {
             self.selectorType = candidate.selectorType
             self.displayText = candidate.displayText
+            self.candidateId = candidate.id
         }
     }
 
@@ -143,7 +145,7 @@ final class CCXTaskSourceStore {
 
         do {
             let loaded = try await cli().readTaskSource(projectId: projectId)
-            apply(snapshot: loaded)
+            await apply(snapshot: loaded)
             sourceChangeMessage = nil
         } catch {
             errorMessage = Self.message(for: error)
@@ -280,7 +282,7 @@ final class CCXTaskSourceStore {
                 expectedHash: expectedHash,
                 content: draftContent
             )
-            snapshot = CCXTaskSourceSnapshot(
+            let updatedSnapshot = CCXTaskSourceSnapshot(
                 projectId: result.projectId,
                 path: result.path,
                 content: draftContent,
@@ -288,9 +290,7 @@ final class CCXTaskSourceStore {
                 mtime: result.mtime,
                 warning: result.warning
             )
-            let candidates = Self.workItemCandidates(in: draftContent)
-            discardPendingWorkCreateAttemptsMissing(from: candidates)
-            updateWorkItemCandidates(candidates, for: draftContent)
+            await apply(snapshot: updatedSnapshot)
             sourceChangeMessage = nil
         } catch {
             if Self.isConflict(error) {
@@ -404,16 +404,20 @@ final class CCXTaskSourceStore {
         CCXWorkItemCandidateParser.parse(markdown)
     }
 
-    private func apply(snapshot: CCXTaskSourceSnapshot) {
+    private func apply(snapshot: CCXTaskSourceSnapshot) async {
         self.snapshot = snapshot
         setDraftContentWithoutSchedulingParse(snapshot.content)
-        let candidates = Self.workItemCandidates(in: snapshot.content)
-        guard !Task.isCancelled else {
-            scheduleWorkItemCandidateParse(for: snapshot.content)
-            return
+        guard !Task.isCancelled else { return }
+        let parseTask = Task.detached(priority: .userInitiated) {
+            CCXWorkItemCandidateParser.parse(snapshot.content)
         }
-        discardPendingWorkCreateAttemptsMissing(from: candidates)
-        updateWorkItemCandidates(candidates, for: snapshot.content)
+        let candidates = await withTaskCancellationHandler {
+            await parseTask.value
+        } onCancel: {
+            parseTask.cancel()
+        }
+        guard !Task.isCancelled else { return }
+        updateWorkItemCandidates(candidates, for: snapshot.content, prunePendingAttempts: true)
     }
 
     private func setDraftContentWithoutSchedulingParse(_ content: String) {
@@ -438,10 +442,17 @@ final class CCXTaskSourceStore {
         }
     }
 
-    private func updateWorkItemCandidates(_ candidates: [CCXTaskSourceWorkItemCandidate], for markdown: String) {
+    private func updateWorkItemCandidates(
+        _ candidates: [CCXTaskSourceWorkItemCandidate],
+        for markdown: String,
+        prunePendingAttempts: Bool = false
+    ) {
         workItemCandidatesParseTask?.cancel()
         workItemCandidatesParseTask = nil
         guard draftContent == markdown else { return }
+        if prunePendingAttempts {
+            discardPendingWorkCreateAttemptsMissing(from: candidates)
+        }
         workItemCandidates = candidates
         clearMissingWorkItemSelection(in: candidates)
     }

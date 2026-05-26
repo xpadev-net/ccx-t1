@@ -11,7 +11,7 @@ use crate::domain::event::{
 use crate::domain::work_execution::WorkExecutionState;
 use crate::error::CcxError;
 use crate::git::github::{execute_merge, MergeConfig};
-use crate::git::worktree::{create_worktree, remove_worktree};
+use crate::git::worktree::{create_worktree, prune_worktrees, remove_worktree};
 use crate::persistence::jsonl::{append_events_to_dir, EventBatchAppendError};
 use crate::work::cleanup::{run_cleanup, CleanupConfig};
 
@@ -277,6 +277,7 @@ fn cleanup_create_artifacts(
 ) {
     let worktree_exists = worktree.exists();
     let worktree_removed = if !worktree_exists {
+        let _ = prune_worktrees(repo);
         true
     } else if test_fail_cleanup_remove_worktree() {
         false

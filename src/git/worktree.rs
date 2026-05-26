@@ -53,6 +53,11 @@ pub fn remove_worktree(repo: &Utf8Path, worktree_path: &Utf8Path) -> Result<(), 
         )));
     }
 
+    prune_worktrees(repo)
+}
+
+/// Prune stale git worktree administrative files.
+pub fn prune_worktrees(repo: &Utf8Path) -> Result<(), CcxError> {
     let prune_status = std::process::Command::new("git")
         .args(["worktree", "prune"])
         .current_dir(repo)
