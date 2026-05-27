@@ -186,6 +186,16 @@ public struct CCXAgentPromptResult: Hashable, Sendable, Decodable {
     }
 }
 
+public struct CCXAgentStopResult: Hashable, Sendable, Decodable {
+    public let sessionId: String
+    public let status: String
+
+    private enum CodingKeys: String, CodingKey {
+        case sessionId = "session_id"
+        case status
+    }
+}
+
 public struct CCXWorkCreateResult: Hashable, Sendable, Decodable {
     public let workExecutionId: String
     public let branchName: String
