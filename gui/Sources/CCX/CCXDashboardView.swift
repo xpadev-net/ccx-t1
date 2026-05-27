@@ -269,15 +269,7 @@ public struct CCXWorkExecutionsView: View {
         // following the cmux snapshot-boundary rule (no ObservableObject in row
         // builders).
         let items = store.workExecutions
-        let workerSessionByWorkExecution = Dictionary<String, CCXAgentSession>(
-            store.agentSessions.compactMap {
-            guard $0.role == "worker", let workExecutionId = $0.workExecutionId else {
-                return nil
-            }
-            return (workExecutionId, $0)
-            },
-            uniquingKeysWith: { _, latest in latest }
-        )
+        let workerSessionByWorkExecution = selectLatestWorkerSessionByWorkExecution(from: store.agentSessions)
         List(items) { item in
             CCXWorkExecutionRow(
                 item: item,
@@ -285,6 +277,30 @@ public struct CCXWorkExecutionsView: View {
                 workerSession: workerSessionByWorkExecution[item.workExecutionId]
             )
         }
+    }
+
+    private func selectLatestWorkerSessionByWorkExecution(from sessions: [CCXAgentSession]) -> [String: CCXAgentSession] {
+        var latestByWorkExecution: [String: CCXAgentSession] = [:]
+
+        for session in sessions where session.role == "worker" {
+            guard let workExecutionId = session.workExecutionId else { continue }
+
+            if let currentSession = latestByWorkExecution[workExecutionId],
+               latestActivityTimestamp(currentSession) >= latestActivityTimestamp(session) {
+                continue
+            }
+
+            latestByWorkExecution[workExecutionId] = session
+        }
+
+        return latestByWorkExecution
+    }
+
+    private func latestActivityTimestamp(_ session: CCXAgentSession) -> String {
+        if let heartbeat = session.lastHeartbeatAt, !heartbeat.isEmpty {
+            return heartbeat
+        }
+        return session.startedAt ?? ""
     }
 }
 
@@ -330,7 +346,7 @@ private struct CCXWorkExecutionRow: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
-            if let stopErrorMessage {
+                if let stopErrorMessage {
                 Text(stopErrorMessage)
                     .font(.caption2)
                     .foregroundStyle(.red)
@@ -343,6 +359,11 @@ private struct CCXWorkExecutionRow: View {
             }
         }
         .padding(.vertical, 2)
+        .onChange(of: workerSession?.agentSessionId) { _ in
+            stopMessage = nil
+            stopErrorMessage = nil
+            isStopping = false
+        }
     }
 
     private var stateLabel: String {
