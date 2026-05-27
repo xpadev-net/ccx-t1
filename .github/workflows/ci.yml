@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  rust-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@a27efb2e2b75a9eb2002c34c2c42b41349a7e1c3 # stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Run tests
+        run: cargo test
+
+      - name: Run clippy
+        run: cargo clippy
+
+  swift-tests:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - CMUXAgentLaunch
+          - CMUXAgentVault
+          - CMUXAuthCore
+          - CMUXDebugLog
+          - CMUXPasteboardFidelity
+          - CMUXSocketPathDomain
+          - CMUXWorkstream
+          - CmuxExtensionKit
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          if [ -d "/Applications/Xcode.app/Contents/Developer" ]; then
+            XCODE_DIR="/Applications/Xcode.app/Contents/Developer"
+          else
+            XCODE_APP="$(ls -d /Applications/Xcode*.app 2>/dev/null | sort | tail -n 1 || true)"
+            if [ -n "$XCODE_APP" ]; then
+              XCODE_DIR="$XCODE_APP/Contents/Developer"
+            else
+              echo "No Xcode.app found under /Applications" >&2
+              exit 1
+            fi
+          fi
+          echo "DEVELOPER_DIR=$XCODE_DIR" >> "$GITHUB_ENV"
+          export DEVELOPER_DIR="$XCODE_DIR"
+          xcodebuild -version
+
+      - name: Cache Swift packages
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: gui/.build
+          key: ${{ runner.os }}-spm-${{ matrix.package }}-${{ hashFiles(format('gui/Packages/{0}/Package.swift', matrix.package), format('gui/Packages/{0}/Package.resolved', matrix.package)) }}
+          restore-keys: ${{ runner.os }}-spm-${{ matrix.package }}-
+
+      - name: Test ${{ matrix.package }}
+        run: cd gui/Packages/${{ matrix.package }} && swift test
