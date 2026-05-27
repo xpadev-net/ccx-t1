@@ -359,7 +359,7 @@ private struct CCXWorkExecutionRow: View {
             }
         }
         .padding(.vertical, 2)
-        .onChange(of: workerSession?.agentSessionId) { _ in
+        .onChange(of: workerSession?.agentSessionId) { _, _ in
             stopMessage = nil
             stopErrorMessage = nil
             isStopping = false
