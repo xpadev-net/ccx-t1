@@ -309,8 +309,11 @@ private struct CCXWorkExecutionRow: View {
     let projectId: String
     let workerSession: CCXAgentSession?
     @State private var isStopping = false
+    @State private var isRestarting = false
     @State private var stopMessage: String?
     @State private var stopErrorMessage: String?
+    @State private var restartMessage: String?
+    @State private var restartErrorMessage: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -335,6 +338,22 @@ private struct CCXWorkExecutionRow: View {
                     .buttonStyle(.borderless)
                     .disabled(isStopping)
                 }
+                if canStartWorker() {
+                    Button {
+                        Task { await restartWorker() }
+                    } label: {
+                        if isRestarting {
+                            ProgressView()
+                                .controlSize(.small)
+                                .scaleEffect(0.75)
+                        } else {
+                            Label(String(localized: "ccx.workExecution.restart", defaultValue: "Restart"), systemImage: "arrow.clockwise")
+                                .labelStyle(.iconOnly)
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(isRestarting)
+                }
                 Text(stateLabel)
                     .font(.caption)
                     .padding(.horizontal, 6)
@@ -346,8 +365,18 @@ private struct CCXWorkExecutionRow: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
-                if let stopErrorMessage {
+            if let restartMessage {
+                Text(restartMessage)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            if let stopErrorMessage {
                 Text(stopErrorMessage)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+            }
+            if let restartErrorMessage {
+                Text(restartErrorMessage)
                     .font(.caption2)
                     .foregroundStyle(.red)
             }
@@ -362,7 +391,10 @@ private struct CCXWorkExecutionRow: View {
         .onChange(of: workerSession?.agentSessionId) { _, _ in
             stopMessage = nil
             stopErrorMessage = nil
+            restartMessage = nil
+            restartErrorMessage = nil
             isStopping = false
+            isRestarting = false
         }
     }
 
@@ -372,6 +404,13 @@ private struct CCXWorkExecutionRow: View {
 
     private func canStopWorkerSession(_ state: String) -> Bool {
         !["stopped", "exited", "lost"].contains(state)
+    }
+
+    private func canStartWorker() -> Bool {
+        guard let workerSession else {
+            return true
+        }
+        return ["stopped", "exited", "lost", "hung"].contains(workerSession.state)
     }
 
     private func stopWorker(sessionId: String) async {
@@ -395,7 +434,7 @@ private struct CCXWorkExecutionRow: View {
     }
 
     private static func message(for error: Error) -> String {
-            if let cliError = error as? CCXControllerCLIError {
+        if let cliError = error as? CCXControllerCLIError {
             switch cliError {
             case .executableNotFound, .notExecutable, .launchFailed:
                 return String(
@@ -418,6 +457,31 @@ private struct CCXWorkExecutionRow: View {
             localized: "ccx.tasks.workExecution.error.generic",
             defaultValue: "Could not stop the worker. Check the CCX controller and retry."
         )
+    }
+
+    private func restartWorker() async {
+        guard canStartWorker(), !isRestarting else { return }
+        isRestarting = true
+        restartMessage = nil
+        restartErrorMessage = nil
+
+        do {
+            let cli = try CCXControllerCLI.make().get()
+            _ = try await cli.attachAgent(
+                projectId: projectId,
+                workExecutionId: item.workExecutionId,
+                role: "worker",
+                mode: "writer"
+            )
+            restartMessage = String(
+                localized: "ccx.workExecution.restarted",
+                defaultValue: "Worker attach requested."
+            )
+        } catch {
+            restartErrorMessage = Self.message(for: error)
+        }
+
+        isRestarting = false
     }
 }
 
