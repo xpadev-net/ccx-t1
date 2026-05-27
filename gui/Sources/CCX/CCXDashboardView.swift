@@ -462,6 +462,9 @@ private struct CCXWorkExecutionRow: View {
     }
 
     private var stateLabel: String {
+        if isStopping {
+            return String(localized: "ccx.work.state.stopping", defaultValue: "Stopping")
+        }
         CCXWorkExecutionState(rawValue: item.state)?.localizedLabel ?? item.state
     }
 

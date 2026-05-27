@@ -12,6 +12,7 @@
     "ccx.work.state.mergeReady": {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Merge ready"}},"ja":{"stringUnit":{"state":"translated","value":"マージ準備完了"}}}},
     "ccx.work.state.merging": {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Merging"}},"ja":{"stringUnit":{"state":"translated","value":"マージ中"}}}},
     "ccx.work.state.merged": {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Merged"}},"ja":{"stringUnit":{"state":"translated","value":"マージ済み"}}}},
+    "ccx.work.state.stopping": {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Stopping"}},"ja":{"stringUnit":{"state":"translated","value":"停止中"}}}},
     "ccx.work.state.followupRequired": {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Follow-up required"}},"ja":{"stringUnit":{"state":"translated","value":"フォローアップが必要"}}}},
     "ccx.work.state.returned": {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Returned"}},"ja":{"stringUnit":{"state":"translated","value":"差し戻し"}}}},
     "ccx.work.state.blocked": {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Blocked"}},"ja":{"stringUnit":{"state":"translated","value":"ブロック中"}}}},
