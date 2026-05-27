@@ -289,6 +289,10 @@ private struct CCXTaskSourcePanel: View {
             await refreshStatus(for: project.taskSourceFile)
             await sourceStore.handleTaskSourceChanged(newHash: sourceChangeHash)
         }
+        .task(id: sourceStore.composerRefreshToken) {
+            guard let token = sourceStore.composerRefreshToken, status.canOpen else { return }
+            await sourceStore.awaitComposerReflectionTimeout(for: token)
+        }
     }
 
     private func labelled(_ label: String, _ value: String) -> some View {

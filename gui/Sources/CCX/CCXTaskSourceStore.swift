@@ -22,6 +22,7 @@ final class CCXTaskSourceStore {
     private(set) var conflictMessage: String?
     private(set) var composerErrorMessage: String?
     private(set) var composerValidationMessage: String?
+    private(set) var composerRefreshToken: UUID?
     private(set) var composerStatusMessage: String?
     private(set) var sourceChangeMessage: String?
     private(set) var workCreateErrorMessage: String?
@@ -158,6 +159,7 @@ final class CCXTaskSourceStore {
         }
         if let newHash, newHash == snapshot?.hash {
             sourceChangeMessage = nil
+            stopComposerReflectionWatch()
             return
         }
         if isDirty {
@@ -168,6 +170,20 @@ final class CCXTaskSourceStore {
             return
         }
         await load()
+    }
+
+    func awaitComposerReflectionTimeout(for token: UUID) async {
+        guard composerRefreshToken == token else { return }
+        do {
+            try await Task.sleep(for: .seconds(15))
+        } catch {
+            return
+        }
+        guard composerRefreshToken == token else { return }
+        composerErrorMessage = String(
+            localized: "ccx.tasks.composer.error.noReflection",
+            defaultValue: "No task source update was observed yet. Reopen the task source or retry if the composition was not applied."
+        )
     }
 
     func discardChanges() {
@@ -285,9 +301,18 @@ final class CCXTaskSourceStore {
                 localized: "ccx.tasks.composer.sent",
                 defaultValue: "Sent to Orchestrator."
             )
+            startComposerReflectionWatch()
         } catch {
             composerErrorMessage = CCXTaskComposerSupport.message(for: error)
         }
+    }
+
+    private func startComposerReflectionWatch() {
+        composerRefreshToken = UUID()
+    }
+
+    private func stopComposerReflectionWatch() {
+        composerRefreshToken = nil
     }
 
     private static func validateComposerInput(
@@ -353,6 +378,7 @@ final class CCXTaskSourceStore {
     private func apply(snapshot: CCXTaskSourceSnapshot) async {
         guard !Task.isCancelled else { return }
         self.snapshot = snapshot
+        stopComposerReflectionWatch()
         _draftContent = snapshot.content
         let parseTask = scheduleWorkItemCandidateParse(for: snapshot.content, prunePendingAttempts: true)
         await withTaskCancellationHandler {
