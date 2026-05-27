@@ -262,11 +262,16 @@ final class CCXTaskSourceStore {
 
         do {
             let cli = try cli()
-            let sessionId: String
-            if let orchestratorSessionId, !orchestratorSessionId.isEmpty {
-                sessionId = orchestratorSessionId
+            let sessionId: String = if let orchestratorSessionId,
+                !orchestratorSessionId.isEmpty {
+                orchestratorSessionId
             } else {
-                sessionId = try await cli.startOrchestrator(projectId: project.projectId).agentSessionId
+                do {
+                    try await cli.startOrchestrator(projectId: project.projectId).agentSessionId
+                } catch {
+                    composerErrorMessage = CCXTaskComposerSupport.startOrchestratorErrorMessage(for: error)
+                    return
+                }
             }
             let prompt = CCXTaskComposerSupport.prompt(
                 request: request,

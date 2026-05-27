@@ -58,4 +58,26 @@ enum CCXTaskComposerSupport {
         return String(localized: "ccx.tasks.composer.error.generic",
                       defaultValue: "Could not send the request to Orchestrator. Check the agent session, then try again.")
     }
+
+    static func startOrchestratorErrorMessage(for error: Error) -> String {
+        if let cliError = error as? CCXControllerCLIError {
+            let detail = composeErrorDetail(for: cliError)
+            return String(
+                localized: "ccx.tasks.composer.error.startOrchestrator",
+                defaultValue: "Could not start Orchestrator automatically. Resolve the controller issue and retry."
+            ) + detail
+        }
+        return String(
+            localized: "ccx.tasks.composer.error.startOrchestrator",
+            defaultValue: "Could not start Orchestrator automatically. Resolve the controller issue and retry."
+        )
+    }
+
+    private static func composeErrorDetail(for cliError: CCXControllerCLIError) -> String {
+        if case let .processFailed(_, _, stderr) = cliError,
+           !stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return " Detail: \(stderr.trimmingCharacters(in: .whitespacesAndNewlines))"
+        }
+        return ""
+    }
 }
