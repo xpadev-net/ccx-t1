@@ -310,10 +310,15 @@ private struct CCXWorkExecutionRow: View {
     let workerSession: CCXAgentSession?
     @State private var isStopping = false
     @State private var isRestarting = false
+    @State private var isPrompting = false
     @State private var stopMessage: String?
     @State private var stopErrorMessage: String?
     @State private var restartMessage: String?
     @State private var restartErrorMessage: String?
+    @State private var promptDraft = ""
+    @State private var promptErrorMessage: String?
+    @State private var promptSentMessage: String?
+    @State private var promptHistory: [String] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -354,6 +359,22 @@ private struct CCXWorkExecutionRow: View {
                     .buttonStyle(.borderless)
                     .disabled(isRestarting)
                 }
+                if let workerSession, canSendPrompt(for: workerSession.state) {
+                    Button {
+                        Task { await sendPrompt(sessionId: workerSession.agentSessionId) }
+                    } label: {
+                        if isPrompting {
+                            ProgressView()
+                                .controlSize(.small)
+                                .scaleEffect(0.75)
+                        } else {
+                            Label(String(localized: "ccx.workExecution.prompt", defaultValue: "Prompt"), systemImage: "paperplane")
+                                .labelStyle(.iconOnly)
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(isPrompting || promptDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !canSendPrompt(for: workerSession.state))
+                }
                 Text(stateLabel)
                     .font(.caption)
                     .padding(.horizontal, 6)
@@ -375,16 +396,53 @@ private struct CCXWorkExecutionRow: View {
                     .font(.caption2)
                     .foregroundStyle(.red)
             }
+            if let promptSentMessage {
+                Text(promptSentMessage)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            if let promptErrorMessage {
+                Text(promptErrorMessage)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+            }
             if let restartErrorMessage {
                 Text(restartErrorMessage)
                     .font(.caption2)
                     .foregroundStyle(.red)
+            }
+            if let workerSession {
+                Text(String(
+                    localized: "ccx.workExecution.promptSession",
+                    defaultValue: "Worker session: %@"
+                ).replacingOccurrences(of: "%@", with: workerSession.agentSessionId))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            if !promptHistory.isEmpty {
+                Text(String(localized: "ccx.workExecution.promptHistory", defaultValue: "Recent instructions"))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                ForEach(promptHistory.prefix(3), id: \.self) { history in
+                    Text(history)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
             if let branch = item.branchName {
                 Text(branch)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+            }
+            if let workerSession, canSendPrompt(for: workerSession.state) {
+                TextField(
+                    String(localized: "ccx.workExecution.promptPlaceholder", defaultValue: "Additional instruction for the worker"),
+                    text: $promptDraft
+                )
+                .textFieldStyle(.roundedBorder)
             }
         }
         .padding(.vertical, 2)
@@ -393,8 +451,13 @@ private struct CCXWorkExecutionRow: View {
             stopErrorMessage = nil
             restartMessage = nil
             restartErrorMessage = nil
+            promptDraft = ""
+            promptErrorMessage = nil
+            promptSentMessage = nil
+            promptHistory = []
             isStopping = false
             isRestarting = false
+            isPrompting = false
         }
     }
 
@@ -411,6 +474,10 @@ private struct CCXWorkExecutionRow: View {
             return true
         }
         return ["stopped", "exited", "lost", "hung"].contains(workerSession.state)
+    }
+
+    private func canSendPrompt(for state: String) -> Bool {
+        return !["stopped", "exited", "lost"].contains(state)
     }
 
     private func stopWorker(sessionId: String) async {
@@ -444,18 +511,18 @@ private struct CCXWorkExecutionRow: View {
             case .processFailed:
                 return String(
                     localized: "ccx.tasks.workExecution.error.generic",
-                    defaultValue: "Could not stop the worker. Check the CCX controller and retry."
+                    defaultValue: "Could not execute worker action. Check the CCX controller and retry."
                 )
             case .invalidJSON, .timedOut, .cancelled:
                 return String(
                     localized: "ccx.tasks.workExecution.error.generic",
-                    defaultValue: "Could not stop the worker. Check the CCX controller and retry."
+                    defaultValue: "Could not execute worker action. Check the CCX controller and retry."
                 )
             }
         }
         return String(
             localized: "ccx.tasks.workExecution.error.generic",
-            defaultValue: "Could not stop the worker. Check the CCX controller and retry."
+            defaultValue: "Could not execute worker action. Check the CCX controller and retry."
         )
     }
 
@@ -482,6 +549,34 @@ private struct CCXWorkExecutionRow: View {
         }
 
         isRestarting = false
+    }
+
+    private func sendPrompt(sessionId: String) async {
+        guard !isPrompting else { return }
+        let message = promptDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !message.isEmpty else { return }
+
+        isPrompting = true
+        promptErrorMessage = nil
+        promptSentMessage = nil
+
+        do {
+            let cli = try CCXControllerCLI.make().get()
+            _ = try await cli.promptAgent(sessionId: sessionId, message: message)
+            promptHistory.insert(message, at: 0)
+            if promptHistory.count > 3 {
+                promptHistory.removeLast()
+            }
+            promptDraft = ""
+            promptSentMessage = String(
+                localized: "ccx.workExecution.promptSent",
+                defaultValue: "Prompt sent to worker."
+            )
+        } catch {
+            promptErrorMessage = Self.message(for: error)
+        }
+
+        isPrompting = false
     }
 }
 
