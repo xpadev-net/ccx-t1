@@ -186,11 +186,16 @@ private struct CCXTaskSourcePanel: View {
                         if !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             sourceStore.clearComposerStatusMessage()
                         }
-                    }
+                }
                 if let status = sourceStore.composerStatusMessage {
                     Text(status)
                         .font(.callout)
                         .foregroundStyle(.secondary)
+                }
+                if let validation = sourceStore.composerValidationMessage {
+                    Text(validation)
+                        .font(.callout)
+                        .foregroundStyle(.red)
                 }
                 if let error = sourceStore.composerErrorMessage {
                     Text(error)

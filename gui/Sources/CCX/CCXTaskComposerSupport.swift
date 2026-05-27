@@ -34,8 +34,12 @@ enum CCXTaskComposerSupport {
             - Inspect the repository code before changing the task source when code context is needed.
             - Split and detail the request into actionable task-source entries when useful.
             - Update the task source file with the refined task content.
+            - Keep the exact user request text in the task source entry so traceability is preserved.
+            - Append only, never rewrite the existing task source content (unless a single section edit is strictly required).
+            - If you can only add content, keep your output in minimal patch/diff style and describe why each added block is needed.
             - Prefer `ccx task-source append` or `ccx task-source write` so the controller records the reflection event.
-            - Preserve the GUI original request in the task source entry or nearby context.
+            - When a write/write-mode call conflicts, stop, re-read the latest task source, and retry with minimal additive changes against fresh content.
+            - If conflict persists, report precise retry guidance and return the request context so the GUI can trigger a single retry.
             - Do not overwrite unrelated task source content.
         """
     }

@@ -21,6 +21,7 @@ final class CCXTaskSourceStore {
     private(set) var errorMessage: String?
     private(set) var conflictMessage: String?
     private(set) var composerErrorMessage: String?
+    private(set) var composerValidationMessage: String?
     private(set) var composerStatusMessage: String?
     private(set) var sourceChangeMessage: String?
     private(set) var workCreateErrorMessage: String?
@@ -30,7 +31,11 @@ final class CCXTaskSourceStore {
     private var pendingSourceChangeHash: String?
     private(set) var lastCreatedWorkExecutionId: String?
     private let workExecutionCreator = CCXWorkExecutionCreator()
-    var composerInput = ""
+    var composerInput = "" {
+        didSet {
+            composerValidationMessage = Self.validateComposerInput(composerInput)
+        }
+    }
     var selectedWorkItemCandidateId: String?
     var desiredTaskFormat = String(
         localized: "ccx.defaultTaskFormat",
@@ -50,6 +55,7 @@ final class CCXTaskSourceStore {
     ) {
         self.projectId = projectId
         self.cliProvider = cliProvider
+        self.composerValidationMessage = Self.validateComposerInput(composerInput)
     }
 
     deinit {
@@ -66,7 +72,9 @@ final class CCXTaskSourceStore {
     }
 
     var canSubmitComposer: Bool {
-        !composerInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isComposing
+        composerValidationMessage == nil
+            && !composerInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !isComposing
     }
 
     var selectedWorkItemCandidate: CCXTaskSourceWorkItemCandidate? {
@@ -177,6 +185,8 @@ final class CCXTaskSourceStore {
 
     func clearComposerStatusMessage() {
         composerStatusMessage = nil
+        composerErrorMessage = nil
+        composerValidationMessage = Self.validateComposerInput(composerInput)
     }
 
     func createWorkExecutionFromSelection(project: CCXProjectSummary) async {
@@ -238,7 +248,13 @@ final class CCXTaskSourceStore {
         orchestratorSessionId: String?
     ) async {
         let request = composerInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !request.isEmpty, !isComposing else { return }
+        if let validation = Self.validateComposerInput(request, isSubmitting: true) {
+            composerValidationMessage = validation
+            composerErrorMessage = validation
+            return
+        }
+        composerValidationMessage = nil
+        guard !isComposing else { return }
         isComposing = true
         composerErrorMessage = nil
         composerStatusMessage = nil
@@ -267,6 +283,62 @@ final class CCXTaskSourceStore {
         } catch {
             composerErrorMessage = CCXTaskComposerSupport.message(for: error)
         }
+    }
+
+    private static func validateComposerInput(
+        _ input: String,
+        isSubmitting: Bool = false
+    ) -> String? {
+        let normalized = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized.isEmpty {
+            guard isSubmitting else { return nil }
+            return String(
+                localized: "ccx.tasks.composer.validation.empty",
+                defaultValue: "Task request is empty. Please enter details before sending."
+            )
+        }
+        if normalized.utf8.count > 8_192 {
+            return String(
+                localized: "ccx.tasks.composer.validation.tooLong",
+                defaultValue: "Task request is too long. Please shorten it."
+            )
+        }
+        if normalized.contains(where: { char in
+            let scalar = char.unicodeScalars.first?.value ?? 0
+            return scalar < 0x09 || (scalar >= 0x0E && scalar < 0x20)
+        }) {
+            return String(
+                localized: "ccx.tasks.composer.validation.invalidCharacters",
+                defaultValue: "Task request contains unsupported characters."
+            )
+        }
+        if !hasBalancedCodeFences(normalized) || hasMismatchedYamlFrontMatter(normalized) {
+            return String(
+                localized: "ccx.tasks.composer.validation.invalidMarkdown",
+                defaultValue: "Task request text is not valid markdown-like input."
+            )
+        }
+        return nil
+    }
+
+    private static func hasBalancedCodeFences(_ input: String) -> Bool {
+        let lines = input.split(separator: "\n", omittingEmptySubsequences: false)
+        let fenceLines = lines.filter { line in
+            line.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("```")
+        }
+        return fenceLines.count.isMultiple(of: 2)
+    }
+
+    private static func hasMismatchedYamlFrontMatter(_ input: String) -> Bool {
+        let lines = input.split(separator: "\n", omittingEmptySubsequences: false)
+        let firstNonEmpty = lines.first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        guard let first = firstNonEmpty, first.trimmingCharacters(in: .whitespacesAndNewlines) == "---" else {
+            return false
+        }
+        let markerCount = lines.dropFirst().reduce(0) { count, line in
+            count + (line.trimmingCharacters(in: .whitespacesAndNewlines) == "---" ? 1 : 0)
+        }
+        return markerCount != 1
     }
 
     static func workItemCandidates(in markdown: String) -> [CCXTaskSourceWorkItemCandidate] {
