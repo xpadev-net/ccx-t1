@@ -588,8 +588,6 @@ fn emit_merging_failed_transition(
 
     Ok(())
 }
-}
-
 /// Pull the canonical repo, check dirty state, and emit sync events.
 /// Returns (sync_status, sync_warning) — never returns Err (sync failure
 /// is recorded as an event; the merge itself already succeeded).
