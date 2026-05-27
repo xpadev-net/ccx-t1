@@ -85,7 +85,7 @@ jobs:
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: gui/Packages/${{ matrix.package }}/.build
-          key: ${{ runner.os }}-spm-${{ matrix.package }}-${{ hashFiles(format('gui/Packages/{0}/Package.swift', matrix.package)) }}
+          key: ${{ runner.os }}-spm-${{ matrix.package }}-${{ hashFiles(format('gui/Packages/{0}/Package.swift', matrix.package), 'gui/Packages/*/Package.swift') }}
           restore-keys: ${{ runner.os }}-spm-${{ matrix.package }}-
 
       - name: Test ${{ matrix.package }}
