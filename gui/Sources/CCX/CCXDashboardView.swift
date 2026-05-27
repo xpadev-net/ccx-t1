@@ -269,14 +269,29 @@ public struct CCXWorkExecutionsView: View {
         // following the cmux snapshot-boundary rule (no ObservableObject in row
         // builders).
         let items = store.workExecutions
+        let workerSessionByWorkExecution = Dictionary<String, CCXAgentSession>(store.agentSessions.compactMap {
+            guard $0.role == "worker", let workExecutionId = $0.workExecutionId else {
+                return nil
+            }
+            return (workExecutionId, $0)
+        })
         List(items) { item in
-            CCXWorkExecutionRow(item: item)
+            CCXWorkExecutionRow(
+                item: item,
+                projectId: store.projectId,
+                workerSession: workerSessionByWorkExecution[item.workExecutionId]
+            )
         }
     }
 }
 
 private struct CCXWorkExecutionRow: View {
     let item: CCXWorkExecution
+    let projectId: String
+    let workerSession: CCXAgentSession?
+    @State private var isStopping = false
+    @State private var stopMessage: String?
+    @State private var stopErrorMessage: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -285,11 +300,37 @@ private struct CCXWorkExecutionRow: View {
                     .font(.callout)
                     .lineLimit(1)
                 Spacer()
+                if let workerSession, canStopWorkerSession(workerSession.state) {
+                    Button {
+                        Task { await stopWorker(sessionId: workerSession.agentSessionId) }
+                    } label: {
+                        if isStopping {
+                            ProgressView()
+                                .controlSize(.small)
+                                .scaleEffect(0.75)
+                        } else {
+                            Label(String(localized: "ccx.workExecution.stopWorker", defaultValue: "Stop"), systemImage: "stop.fill")
+                                .labelStyle(.iconOnly)
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(isStopping)
+                }
                 Text(stateLabel)
                     .font(.caption)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(.quaternary.opacity(0.4), in: Capsule())
+            }
+            if let stopMessage {
+                Text(stopMessage)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            if let stopErrorMessage {
+                Text(stopErrorMessage)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
             }
             if let branch = item.branchName {
                 Text(branch)
@@ -303,6 +344,60 @@ private struct CCXWorkExecutionRow: View {
 
     private var stateLabel: String {
         CCXWorkExecutionState(rawValue: item.state)?.localizedLabel ?? item.state
+    }
+
+    private func canStopWorkerSession(_ state: String) -> Bool {
+        !["stopped", "exited", "lost"].contains(state)
+    }
+
+    private func stopWorker(sessionId: String) async {
+        guard !isStopping else { return }
+        isStopping = true
+        stopMessage = nil
+        stopErrorMessage = nil
+
+        do {
+            let cli = try CCXControllerCLI.make().get()
+            _ = try await cli.stopAgent(projectId: projectId, sessionId: sessionId)
+            stopMessage = String(
+                localized: "ccx.workExecution.stopRequested",
+                defaultValue: "Stop requested."
+            )
+        } catch {
+            stopErrorMessage = Self.message(for: error)
+        }
+
+        isStopping = false
+    }
+
+    private static func message(for error: Error) -> String {
+        if let cliError = error as? CCXControllerCLIError {
+            switch cliError {
+            case .executableNotFound, .notExecutable, .launchFailed:
+                return String(
+                    localized: "ccx.tasks.editor.error.cliUnavailable",
+                    defaultValue: "CCX controller CLI is not available. Check the CCX installation, then try again."
+                )
+            case .processFailed(let exitCode, _, _):
+                return String(
+                    format: String(
+                        localized: "ccx.tasks.workExecution.error.stopFailedCode",
+                        defaultValue: "Failed to stop worker (exit code %lld)."
+                    ),
+                    locale: .current,
+                    Int64(exitCode)
+                )
+            case .invalidJSON, .timedOut, .cancelled:
+                return String(
+                    localized: "ccx.tasks.workExecution.error.generic",
+                    defaultValue: "Could not stop the worker. Check the CCX controller and retry."
+                )
+            }
+        }
+        return String(
+            localized: "ccx.tasks.workExecution.error.generic",
+            defaultValue: "Could not stop the worker. Check the CCX controller and retry."
+        )
     }
 }
 
