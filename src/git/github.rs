@@ -250,6 +250,7 @@ pub fn execute_merge(config: &MergeConfig) -> Result<MergeOutcome, CcxError> {
                 &merge_lock_id,
                 pr_number,
                 &reason,
+                false,
             )?;
             return Err(CcxError::Other(anyhow::anyhow!("{reason}")));
         }
@@ -263,6 +264,7 @@ pub fn execute_merge(config: &MergeConfig) -> Result<MergeOutcome, CcxError> {
                 &merge_lock_id,
                 pr_number,
                 &reason,
+                false,
             )?;
             return Err(CcxError::Other(anyhow::anyhow!("{reason}")));
         }
@@ -276,6 +278,7 @@ pub fn execute_merge(config: &MergeConfig) -> Result<MergeOutcome, CcxError> {
                 &merge_lock_id,
                 pr_number,
                 &reason,
+                false,
             )?;
             return Err(CcxError::Other(anyhow::anyhow!("{reason}")));
         }
@@ -301,6 +304,7 @@ pub fn execute_merge(config: &MergeConfig) -> Result<MergeOutcome, CcxError> {
                 &merge_lock_id,
                 pr_number,
                 &e.to_string(),
+                false,
             )?;
             return Err(e);
         }
@@ -317,6 +321,7 @@ pub fn execute_merge(config: &MergeConfig) -> Result<MergeOutcome, CcxError> {
                 &merge_lock_id,
                 pr_number,
                 &reason,
+                false,
             )?;
             return Err(CcxError::Other(anyhow::anyhow!("{reason}")));
         }
@@ -333,6 +338,7 @@ pub fn execute_merge(config: &MergeConfig) -> Result<MergeOutcome, CcxError> {
                         &merge_lock_id,
                         pr_number,
                         &reason,
+                        false,
                     )?;
                     return Err(CcxError::Other(anyhow::anyhow!("{reason}")));
                 }
@@ -346,6 +352,7 @@ pub fn execute_merge(config: &MergeConfig) -> Result<MergeOutcome, CcxError> {
                         &merge_lock_id,
                         pr_number,
                         &reason,
+                        false,
                     )?;
                     return Err(CcxError::Other(anyhow::anyhow!("{reason}")));
                 }
@@ -359,6 +366,7 @@ pub fn execute_merge(config: &MergeConfig) -> Result<MergeOutcome, CcxError> {
                         &merge_lock_id,
                         pr_number,
                         &reason,
+                        false,
                     )?;
                     return Err(CcxError::Other(anyhow::anyhow!("{reason}")));
                 }
@@ -378,6 +386,7 @@ pub fn execute_merge(config: &MergeConfig) -> Result<MergeOutcome, CcxError> {
                                 &merge_lock_id,
                                 pr_number,
                                 &reason,
+                                false,
                             )?;
                             return Err(CcxError::Other(anyhow::anyhow!("{reason}")));
                         }
@@ -432,6 +441,7 @@ pub fn execute_merge(config: &MergeConfig) -> Result<MergeOutcome, CcxError> {
                 &merge_lock_id,
                 pr_number,
                 &e.to_string(),
+                true,
             )?;
             return Err(e);
         }
@@ -448,6 +458,7 @@ pub fn execute_merge(config: &MergeConfig) -> Result<MergeOutcome, CcxError> {
                 &merge_lock_id,
                 pr_number,
                 &reason,
+                true,
             )?;
             return Err(CcxError::Other(anyhow::anyhow!("{reason}")));
         }
@@ -517,7 +528,12 @@ fn abort_merge(
     merge_lock_id: &str,
     pr_number: u64,
     reason: &str,
+    transition_to_failed: bool,
 ) -> Result<(), CcxError> {
+    if transition_to_failed {
+        emit_merging_failed_transition(project_dir, conn, project_id, work_execution_id)?;
+    }
+
     append_event_to_dir(
         project_dir,
         &Event::new(
@@ -539,6 +555,42 @@ fn abort_merge(
     );
 
     Ok(())
+}
+
+fn emit_merging_failed_transition(
+    project_dir: &camino::Utf8Path,
+    conn: &Connection,
+    project_id: &str,
+    work_execution_id: &str,
+) -> Result<(), CcxError> {
+    let current_state: String = conn
+        .query_row(
+            "SELECT state FROM work_executions WHERE work_execution_id = ?1",
+            rusqlite::params![work_execution_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| {
+            CcxError::Other(anyhow::anyhow!(
+                "failed to read work_execution {work_execution_id} state: {e}"
+            ))
+        })?;
+
+    if current_state != "merging" {
+        return Ok(());
+    }
+
+    append_event_to_dir(
+        project_dir,
+        &Event::new(
+            project_id,
+            Actor::Controller,
+            EventData::WorkExecutionStateChanged(WorkExecutionStateChangedPayload {
+                work_execution_id: work_execution_id.to_string(),
+                from: WorkExecutionState::Merging,
+                to: WorkExecutionState::Failed,
+            }),
+        ),
+    )
 }
 
 /// Pull the canonical repo, check dirty state, and emit sync events.
