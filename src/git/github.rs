@@ -530,10 +530,9 @@ fn abort_merge(
     reason: &str,
     transition_to_failed: bool,
 ) -> Result<(), CcxError> {
-    let mut transition_error: Option<CcxError> = None;
-
     if transition_to_failed {
-        transition_error = emit_merging_failed_transition(project_dir, project_id, work_execution_id).err();
+        // Best-effort terminal transition — don't mask the merge-failure reason.
+        let _ = emit_merging_failed_transition(project_dir, project_id, work_execution_id);
     }
 
     let append_result = append_event_to_dir(
@@ -557,10 +556,6 @@ fn abort_merge(
     );
 
     if let Err(error) = append_result {
-        return Err(error);
-    }
-
-    if let Some(error) = transition_error {
         return Err(error);
     }
 
