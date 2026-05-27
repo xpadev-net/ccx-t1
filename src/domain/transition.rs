@@ -45,6 +45,7 @@ pub fn validate_transition(
         (WorkExecutionState::GateCheck, WorkExecutionState::Blocked) => true,
         (WorkExecutionState::Merging, WorkExecutionState::GateCheck) => true,
         (WorkExecutionState::Merging, WorkExecutionState::ReviewFixing) => true,
+        (WorkExecutionState::Merging, WorkExecutionState::Failed) => true,
         (WorkExecutionState::ReviewFixing, WorkExecutionState::Blocked) => true,
 
         // Any state → Hold or Canceled
@@ -150,6 +151,7 @@ mod tests {
             (Running, Blocked),
             (Running, Failed),
             (GateCheck, Failed),
+            (Merging, Failed),
             (GateCheck, Blocked),
             (Merging, GateCheck),
             (Merging, ReviewFixing),
