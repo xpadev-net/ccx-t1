@@ -530,11 +530,13 @@ fn abort_merge(
     reason: &str,
     transition_to_failed: bool,
 ) -> Result<(), CcxError> {
+    let mut transition_error: Option<CcxError> = None;
+
     if transition_to_failed {
-        emit_merging_failed_transition(project_dir, project_id, work_execution_id)?;
+        transition_error = emit_merging_failed_transition(project_dir, project_id, work_execution_id).err();
     }
 
-    append_event_to_dir(
+    let append_result = append_event_to_dir(
         project_dir,
         &Event::new(
             project_id,
@@ -546,13 +548,21 @@ fn abort_merge(
                 reason: reason.to_string(),
             }),
         ),
-    )?;
+    );
 
     // Best-effort lock release — don't mask the event error
     let _ = conn.execute(
         "UPDATE merge_locks SET state = 'released' WHERE merge_lock_id = ?1",
         rusqlite::params![merge_lock_id],
     );
+
+    if let Err(error) = append_result {
+        return Err(error);
+    }
+
+    if let Some(error) = transition_error {
+        return Err(error);
+    }
 
     Ok(())
 }
