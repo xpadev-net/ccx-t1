@@ -201,6 +201,19 @@ nonisolated public struct CCXControllerCLI {
         return try decodeJSONResult(result, as: CCXAgentPromptResult.self)
     }
 
+    public func stopAgent(projectId: String, sessionId: String) async throws -> CCXAgentStopResult {
+        let result = try await runner(executableURL, [
+            "agent",
+            "stop",
+            "--project-id",
+            projectId,
+            "--session-id",
+            sessionId,
+            "--json",
+        ], nil)
+        return try decodeJSONResult(result, as: CCXAgentStopResult.self)
+    }
+
     public func createWork(
         projectId: String,
         sourcePath: String,
