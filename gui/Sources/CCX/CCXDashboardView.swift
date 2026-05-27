@@ -276,7 +276,7 @@ public struct CCXWorkExecutionsView: View {
             }
             return (workExecutionId, $0)
             },
-            uniquingKeysWith: { first, _ in first }
+            uniquingKeysWith: { _, latest in latest }
         )
         List(items) { item in
             CCXWorkExecutionRow(
@@ -381,7 +381,7 @@ private struct CCXWorkExecutionRow: View {
                     localized: "ccx.tasks.editor.error.cliUnavailable",
                     defaultValue: "CCX controller CLI is not available. Check the CCX installation, then try again."
                 )
-            case .processFailed(let exitCode, _, _):
+            case .processFailed:
                 return String(
                     localized: "ccx.tasks.workExecution.error.generic",
                     defaultValue: "Could not stop the worker. Check the CCX controller and retry."
