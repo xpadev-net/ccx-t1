@@ -14,7 +14,7 @@ use crate::domain::work_execution::WorkExecutionState;
 use crate::error::CcxError;
 use crate::git::repo::{check_dirty, DirtyEntry};
 use crate::git::review_hook::{run_review_hook, ReviewHookOutcome};
-use crate::persistence::jsonl::append_event_to_dir;
+use crate::persistence::jsonl::{append_event_to_dir, locked_read_write};
 use crate::persistence::sqlite::open_db;
 
 // ---------------------------------------------------------------------------
@@ -531,7 +531,7 @@ fn abort_merge(
     transition_to_failed: bool,
 ) -> Result<(), CcxError> {
     if transition_to_failed {
-        emit_merging_failed_transition(project_dir, conn, project_id, work_execution_id)?;
+        emit_merging_failed_transition(project_dir, project_id, work_execution_id)?;
     }
 
     append_event_to_dir(
@@ -559,38 +559,35 @@ fn abort_merge(
 
 fn emit_merging_failed_transition(
     project_dir: &camino::Utf8Path,
-    conn: &Connection,
     project_id: &str,
     work_execution_id: &str,
 ) -> Result<(), CcxError> {
-    let current_state: String = conn
-        .query_row(
-            "SELECT state FROM work_executions WHERE work_execution_id = ?1",
-            rusqlite::params![work_execution_id],
-            |row| row.get(0),
-        )
-        .map_err(|e| {
-            CcxError::Other(anyhow::anyhow!(
-                "failed to read work_execution {work_execution_id} state: {e}"
-            ))
-        })?;
+    locked_read_write(project_dir, |events| {
+        let in_merging_state = events.iter().rev().find_map(|event| match &event.data {
+            EventData::WorkExecutionStateChanged(payload)
+                if payload.work_execution_id == work_execution_id =>
+            {
+                Some(payload.to == WorkExecutionState::Merging)
+            }
+            _ => None,
+        });
 
-    if current_state != "merging" {
-        return Ok(());
-    }
+        match in_merging_state {
+            Some(true) => Ok(Some(Event::new(
+                project_id,
+                Actor::Controller,
+                EventData::WorkExecutionStateChanged(WorkExecutionStateChangedPayload {
+                    work_execution_id: work_execution_id.to_string(),
+                    from: WorkExecutionState::Merging,
+                    to: WorkExecutionState::Failed,
+                }),
+            ))),
+            _ => Ok(None),
+        }
+    })?;
 
-    append_event_to_dir(
-        project_dir,
-        &Event::new(
-            project_id,
-            Actor::Controller,
-            EventData::WorkExecutionStateChanged(WorkExecutionStateChangedPayload {
-                work_execution_id: work_execution_id.to_string(),
-                from: WorkExecutionState::Merging,
-                to: WorkExecutionState::Failed,
-            }),
-        ),
-    )
+    Ok(())
+}
 }
 
 /// Pull the canonical repo, check dirty state, and emit sync events.
