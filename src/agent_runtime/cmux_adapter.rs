@@ -1138,7 +1138,12 @@ esac
 
     #[test]
     fn cli_fallback_does_not_switch_to_headless_after_cli_success() {
-        let dir = tempfile::tempdir().unwrap();
+        let tmp_base = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join("test-tmp");
+        let _ = std::fs::create_dir_all(&tmp_base);
+        let dir = tempfile::tempdir_in(&tmp_base).unwrap();
         let script = dir.path().join("cmux");
         fs::write(
             &script,
