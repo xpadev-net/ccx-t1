@@ -269,12 +269,15 @@ public struct CCXWorkExecutionsView: View {
         // following the cmux snapshot-boundary rule (no ObservableObject in row
         // builders).
         let items = store.workExecutions
-        let workerSessionByWorkExecution = Dictionary<String, CCXAgentSession>(store.agentSessions.compactMap {
+        let workerSessionByWorkExecution = Dictionary<String, CCXAgentSession>(
+            store.agentSessions.compactMap {
             guard $0.role == "worker", let workExecutionId = $0.workExecutionId else {
                 return nil
             }
             return (workExecutionId, $0)
-        })
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
         List(items) { item in
             CCXWorkExecutionRow(
                 item: item,
@@ -371,7 +374,7 @@ private struct CCXWorkExecutionRow: View {
     }
 
     private static func message(for error: Error) -> String {
-        if let cliError = error as? CCXControllerCLIError {
+            if let cliError = error as? CCXControllerCLIError {
             switch cliError {
             case .executableNotFound, .notExecutable, .launchFailed:
                 return String(
@@ -380,12 +383,8 @@ private struct CCXWorkExecutionRow: View {
                 )
             case .processFailed(let exitCode, _, _):
                 return String(
-                    format: String(
-                        localized: "ccx.tasks.workExecution.error.stopFailedCode",
-                        defaultValue: "Failed to stop worker (exit code %lld)."
-                    ),
-                    locale: .current,
-                    Int64(exitCode)
+                    localized: "ccx.tasks.workExecution.error.generic",
+                    defaultValue: "Could not stop the worker. Check the CCX controller and retry."
                 )
             case .invalidJSON, .timedOut, .cancelled:
                 return String(
