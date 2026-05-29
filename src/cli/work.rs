@@ -434,7 +434,7 @@ fn notify_orchestrator_merge_completed(
         }
     };
 
-    let cmux_tab_id: Option<String> = db
+    let cmux_tab_id: Option<String> = match db
         .query_row(
             "SELECT cmux_tab_id FROM agent_sessions \
              WHERE project_id = ?1 \
@@ -443,9 +443,14 @@ fn notify_orchestrator_merge_completed(
              ORDER BY started_at DESC LIMIT 1",
             rusqlite::params![project_id],
             |row| row.get::<_, Option<String>>(0),
-        )
-        .ok()
-        .flatten();
+        ) {
+        Ok(v) => v,
+        Err(rusqlite::Error::QueryReturnedNoRows) => None,
+        Err(e) => {
+            tracing::warn!(error = %e, project_id, "merge: orchestrator session query failed");
+            return;
+        }
+    };
 
     let Some(tab_id) = cmux_tab_id else {
         return;
