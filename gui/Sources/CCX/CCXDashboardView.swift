@@ -161,6 +161,8 @@ private struct CCXProjectSwitchMenu: View {
 
 public struct CCXOverviewPanel: View {
     @ObservedObject var store: CCXProjectStore
+    @State private var orchestratorStartError: String?
+    @State private var isStartingOrchestrator = false
 
     public init(store: CCXProjectStore) {
         self.store = store
@@ -168,9 +170,11 @@ public struct CCXOverviewPanel: View {
 
     public var body: some View {
         let totals = StateTotals(workExecutions: store.workExecutions)
+        let orchestratorSessions = store.agentSessions.filter { $0.role == "orchestrator" }
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 summaryRow(totals: totals)
+                orchestratorSection(sessions: orchestratorSessions)
                 if let project = store.project {
                     VStack(alignment: .leading, spacing: 4) {
                         labelled(String(localized: "ccx.overview.projectId", defaultValue: "Project ID"),
@@ -185,6 +189,89 @@ public struct CCXOverviewPanel: View {
                 }
             }
             .padding(12)
+        }
+    }
+
+    private func orchestratorSection(sessions: [CCXAgentSession]) -> some View {
+        let isRunning = sessions.contains { ["starting", "running", "idle"].contains($0.state) }
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Circle()
+                    .fill(isRunning ? Color.green : Color.secondary)
+                    .frame(width: 8, height: 8)
+                Text(isRunning
+                    ? String(localized: "ccx.overview.orchestrator.running", defaultValue: "Orchestrator running")
+                    : String(localized: "ccx.overview.orchestrator.stopped", defaultValue: "Orchestrator not running"))
+                    .font(.callout)
+                    .fontWeight(.medium)
+                Spacer()
+                if !isRunning {
+                    Button {
+                        startOrchestrator()
+                    } label: {
+                        if isStartingOrchestrator {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Label(
+                                String(localized: "ccx.overview.orchestrator.start", defaultValue: "Start"),
+                                systemImage: "play.fill"
+                            )
+                        }
+                    }
+                    .disabled(isStartingOrchestrator)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+            }
+            if isRunning, let session = sessions.first(where: { ["running", "idle"].contains($0.state) }) {
+                HStack(spacing: 8) {
+                    labelledCompact(
+                        String(localized: "ccx.overview.orchestrator.sessionId", defaultValue: "Session"),
+                        session.agentSessionId
+                    )
+                    if let startedAt = session.startedAt {
+                        labelledCompact(
+                            String(localized: "ccx.overview.orchestrator.started", defaultValue: "Started"),
+                            startedAt
+                        )
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            if let error = orchestratorStartError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+        .padding(12)
+        .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func labelledCompact(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 2) {
+            Text("\(label):")
+                .foregroundStyle(.secondary)
+            Text(value)
+                .textSelection(.enabled)
+        }
+    }
+
+    private func startOrchestrator() {
+        guard !isStartingOrchestrator, let projectId = store.project?.projectId else { return }
+        isStartingOrchestrator = true
+        orchestratorStartError = nil
+        Task {
+            defer { isStartingOrchestrator = false }
+            do {
+                let cli = try CCXControllerCLI.make().get()
+                _ = try await cli.startOrchestrator(projectId: projectId)
+                store.refresh()
+            } catch {
+                orchestratorStartError = error.localizedDescription
+            }
         }
     }
 
@@ -465,7 +552,7 @@ private struct CCXWorkExecutionRow: View {
         if isStopping {
             return String(localized: "ccx.work.state.stopping", defaultValue: "Stopping")
         }
-        CCXWorkExecutionState(rawValue: item.state)?.localizedLabel ?? item.state
+        return CCXWorkExecutionState(rawValue: item.state)?.localizedLabel ?? item.state
     }
 
     private func canStopWorkerSession(_ state: String) -> Bool {
