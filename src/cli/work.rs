@@ -3,6 +3,7 @@ use clap::Args;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+use crate::agent_runtime::cmux_adapter::make_adapter;
 use crate::config::{load_project_config, project_dir};
 use crate::domain::event::{
     generate_id, Actor, BranchCreatedPayload, Event, EventData, WorkExecutionCreatedPayload,
@@ -13,6 +14,7 @@ use crate::error::CcxError;
 use crate::git::github::{execute_merge, MergeConfig};
 use crate::git::worktree::{create_worktree, prune_worktrees, remove_worktree};
 use crate::persistence::jsonl::{append_events_to_dir, EventBatchAppendError};
+use crate::watcher::open_notification_db;
 use crate::work::cleanup::{run_cleanup, CleanupConfig};
 
 // ---------------------------------------------------------------------------
@@ -398,6 +400,8 @@ pub fn merge_execute(args: MergeExecuteArgs) -> Result<(), CcxError> {
 
     let outcome = execute_merge(&config)?;
 
+    notify_orchestrator_merge_completed(&args.project_id, &args.work_execution_id);
+
     if args.json {
         println!(
             "{}",
@@ -415,4 +419,48 @@ pub fn merge_execute(args: MergeExecuteArgs) -> Result<(), CcxError> {
         }
     }
     Ok(())
+}
+
+fn notify_orchestrator_merge_completed(project_id: &str, work_execution_id: &str) {
+    let dir = match project_dir(project_id) {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::warn!(error = %e, project_id, "merge: cannot open project dir for notification");
+            return;
+        }
+    };
+
+    let db = match open_notification_db(&dir) {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::warn!(error = %e, project_id, "merge: cannot open db for notification");
+            return;
+        }
+    };
+
+    let cmux_tab_id: Option<String> = db
+        .query_row(
+            "SELECT cmux_tab_id FROM agent_sessions \
+             WHERE project_id = ?1 \
+               AND role = 'orchestrator' \
+               AND state IN ('starting', 'running', 'idle') \
+             ORDER BY started_at DESC LIMIT 1",
+            rusqlite::params![project_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .ok()
+        .flatten();
+
+    let Some(tab_id) = cmux_tab_id else {
+        return;
+    };
+
+    let adapter = make_adapter();
+    if let Err(e) = adapter.notify_user(
+        &tab_id,
+        &format!("work execution {work_execution_id} merged"),
+        "info",
+    ) {
+        tracing::warn!(error = %e, work_execution_id, "merge: orchestrator notification failed");
+    }
 }
