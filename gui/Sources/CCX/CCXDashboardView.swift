@@ -270,9 +270,30 @@ public struct CCXOverviewPanel: View {
                 _ = try await cli.startOrchestrator(projectId: projectId)
                 store.refresh()
             } catch {
-                orchestratorStartError = error.localizedDescription
+                orchestratorStartError = Self.orchestratorErrorMessage(for: error)
             }
         }
+    }
+
+    private static func orchestratorErrorMessage(for error: Error) -> String {
+        if let cliError = error as? CCXControllerCLIError {
+            switch cliError {
+            case .executableNotFound, .notExecutable, .launchFailed:
+                return String(
+                    localized: "ccx.overview.orchestrator.error.cliUnavailable",
+                    defaultValue: "CCX controller CLI is not available. Check the CCX installation, then try again."
+                )
+            case .processFailed, .invalidJSON, .timedOut, .cancelled:
+                return String(
+                    localized: "ccx.overview.orchestrator.error.startFailed",
+                    defaultValue: "Could not start the Orchestrator. Check the CCX controller and retry."
+                )
+            }
+        }
+        return String(
+            localized: "ccx.overview.orchestrator.error.startFailed",
+            defaultValue: "Could not start the Orchestrator. Check the CCX controller and retry."
+        )
     }
 
     private func summaryRow(totals: StateTotals) -> some View {
