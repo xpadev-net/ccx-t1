@@ -27,11 +27,33 @@ nonisolated private let ccxDashboardOpenLogger = Logger(
 enum CCXAppDelegateBridge {
     static func presentDashboardIfRequested(on appDelegate: AppDelegate) {
         let args = CCXLaunchArguments.parse()
-        guard args.isCCXLaunch else { return }
-        appDelegate.openCCXDashboardInPreferredMainWindow(
-            projectId: args.projectId,
-            debugSource: "ccxLaunchArgs"
-        )
+        Task {
+            let resolvedProjectId = args.projectId ?? await autoResolveProjectId()
+            await MainActor.run {
+                appDelegate.openCCXDashboardInPreferredMainWindow(
+                    projectId: resolvedProjectId,
+                    debugSource: "ccxLaunchArgs"
+                )
+            }
+        }
+    }
+
+    private static func autoResolveProjectId() async -> String? {
+        let indexURL = CCXProjectStore.defaultCCXHome()
+            .appendingPathComponent("projects.json")
+        let entries: [ProjectIndexEntry]? = await Task.detached(priority: .utility) {
+            guard let data = try? Data(contentsOf: indexURL) else { return nil }
+            return try? JSONDecoder().decode([ProjectIndexEntry].self, from: data)
+        }.value
+        guard let entries, entries.count == 1 else { return nil }
+        return entries[0].projectId
+    }
+
+    private nonisolated struct ProjectIndexEntry: Decodable {
+        let projectId: String
+        private enum CodingKeys: String, CodingKey {
+            case projectId = "project_id"
+        }
     }
 }
 

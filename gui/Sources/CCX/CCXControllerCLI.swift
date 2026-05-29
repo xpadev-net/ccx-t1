@@ -69,6 +69,22 @@ nonisolated public struct CCXControllerCLI {
             }
         }
 
+        // Dev: look for ccx at CCX_PROJECT_ROOT/target/debug/ccx
+        if let root = trimmedNonEmpty(environment["CCX_PROJECT_ROOT"]) {
+            let devCandidate = URL(fileURLWithPath: root)
+                .appendingPathComponent("target/debug/ccx")
+            if fileManager.fileExists(atPath: devCandidate.path) {
+                return executableResult(for: devCandidate, fileManager: fileManager)
+            }
+        }
+
+        // Bundled binary: look inside the app bundle
+        if let bundled = Bundle.main.resourceURL?
+            .appendingPathComponent("bin/ccx"),
+            fileManager.fileExists(atPath: bundled.path) {
+            return executableResult(for: bundled, fileManager: fileManager)
+        }
+
         return .failure(.executableNotFound)
     }
 
