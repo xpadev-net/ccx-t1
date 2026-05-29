@@ -400,7 +400,7 @@ pub fn merge_execute(args: MergeExecuteArgs) -> Result<(), CcxError> {
 
     let outcome = execute_merge(&config)?;
 
-    notify_orchestrator_merge_completed(&args.project_id, &args.work_execution_id);
+    notify_orchestrator_merge_completed(&config.project_dir, &args.project_id, &args.work_execution_id);
 
     if args.json {
         println!(
@@ -421,16 +421,12 @@ pub fn merge_execute(args: MergeExecuteArgs) -> Result<(), CcxError> {
     Ok(())
 }
 
-fn notify_orchestrator_merge_completed(project_id: &str, work_execution_id: &str) {
-    let dir = match project_dir(project_id) {
-        Ok(d) => d,
-        Err(e) => {
-            tracing::warn!(error = %e, project_id, "merge: cannot open project dir for notification");
-            return;
-        }
-    };
-
-    let db = match open_notification_db(&dir) {
+fn notify_orchestrator_merge_completed(
+    project_dir: &camino::Utf8Path,
+    project_id: &str,
+    work_execution_id: &str,
+) {
+    let db = match open_notification_db(project_dir) {
         Ok(d) => d,
         Err(e) => {
             tracing::warn!(error = %e, project_id, "merge: cannot open db for notification");
